@@ -1,0 +1,14 @@
+{
+  "id": "eco",
+  "name": "Eco",
+  "description": "Energy-saving schedule for all days",
+  "week": {
+    "monday": "eco_day",
+    "tuesday": "eco_day",
+    "wednesday": "eco_day",
+    "thursday": "eco_day",
+    "friday": "eco_day",
+    "saturday": "eco_day",
+    "sunday": "eco_day"
+  }
+}

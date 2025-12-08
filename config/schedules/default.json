@@ -1,0 +1,14 @@
+{
+  "id": "default",
+  "name": "Default",
+  "description": "Standard work week schedule",
+  "week": {
+    "monday": "workday",
+    "tuesday": "workday",
+    "wednesday": "workday",
+    "thursday": "workday",
+    "friday": "workday",
+    "saturday": "weekend_day",
+    "sunday": "weekend_day"
+  }
+}

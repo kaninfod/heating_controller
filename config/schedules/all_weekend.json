@@ -1,0 +1,14 @@
+{
+  "id": "all_weekend",
+  "name": "All Weekend",
+  "description": "Weekend schedule for all days - for holidays and extended time at home",
+  "week": {
+    "monday": "weekend_day",
+    "tuesday": "weekend_day",
+    "wednesday": "weekend_day",
+    "thursday": "weekend_day",
+    "friday": "weekend_day",
+    "saturday": "weekend_day",
+    "sunday": "weekend_day"
+  }
+}

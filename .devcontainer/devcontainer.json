@@ -1,0 +1,33 @@
+{
+  "name": "RPi API Dev Env",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  
+  // Set the workspace folder
+  "workspaceFolder": "/workspaces",
+
+  // Configure tool-specific properties.
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true,
+        "editor.formatOnSave": true
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "njpwerner.autodocstring" 
+      ]
+    }
+  },
+
+  // This command runs after the container is created.
+  // It automatically installs your pip requirements.
+  "postCreateCommand": "pip install --upgrade pip && if [ -f requirements.txt ]; then pip install -r requirements.txt; fi",
+
+  // Connect as root (simple setup)
+  "remoteUser": "root"
+}

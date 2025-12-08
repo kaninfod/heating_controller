@@ -1,0 +1,12 @@
+# Home Assistant Connection
+HA_WEBSOCKET_URL=ws://homeassistant.local:8123/api/websocket
+HA_ACCESS_TOKEN=your_long_lived_access_token_here
+
+# Entity IDs (comma-separated, no spaces)
+THERMOSTAT_ENTITIES=climate.bedroom,climate.living_room,climate.kitchen,climate.bathroom,climate.office,climate.hallway
+TEMPERATURE_SENSOR_ENTITIES=sensor.bedroom_temp,sensor.living_temp,sensor.kitchen_temp,sensor.office_temp
+HUMIDITY_SENSOR_ENTITIES=sensor.bedroom_humidity,sensor.living_humidity,sensor.kitchen_humidity,sensor.office_humidity
+
+# App Settings
+STATE_FILE_PATH=data/state.json
+LOG_LEVEL=INFO

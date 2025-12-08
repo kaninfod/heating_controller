@@ -1,0 +1,17 @@
+{
+  "workday": {
+    "name": "Workday",
+    "description": "Standard weekday schedule - morning warm-up, daytime eco, evening comfort",
+    "schedule": "00:00/17 06:30/21 09:00/18 17:00/21 22:00/19 23:00/18"
+  },
+  "weekend_day": {
+    "name": "Weekend Day",
+    "description": "Weekend schedule - sleeping in, all-day comfort",
+    "schedule": "00:00/17 06:30/21 09:00/21 17:00/21 22:00/19 23:00/18"
+  },
+  "eco_day": {
+    "name": "Eco Day",
+    "description": "Energy-saving schedule - minimal heating",
+    "schedule": "00:00/16 07:00/16 09:00/16 17:00/16 22:00/16 23:30/16"
+  }
+}

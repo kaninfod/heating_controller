@@ -1,0 +1,74 @@
+[
+  {
+    "id": "bedroom",
+    "name": "Bedroom",
+    "thermostats": [
+      "climate.bedroom_thermostat"
+    ],
+    "temperature_sensors": [
+      "sensor.bedroom_climate_sensor_temperature"
+    ],
+    "humidity_sensors": [
+      "sensor.bedroom_climate_sensor_humidity"
+    ],
+    "active_schedule": "default",
+    "enabled": true
+  },
+  {
+    "id": "kitchen",
+    "name": "Kitchen",
+    "thermostats": [
+      "climate.kitchen_thermostat"
+    ],
+    "temperature_sensors": [
+      "sensor.kitchen_climate_sensor_temperature"
+    ],
+    "humidity_sensors": [
+      "sensor.kitchen_climate_sensor_humidity"
+    ],
+    "active_schedule": "default",
+    "enabled": true
+  },
+  {
+    "id": "diningroom",
+    "name": "Dining Room",
+    "thermostats": [
+      "climate.dining_room_thermostat_left",
+      "climate.dining_room_thermostat_right"
+    ],
+    "temperature_sensors": [
+      "sensor.diningroom_climate_sensor_temperature"
+    ],
+    "humidity_sensors": [
+      "sensor.diningroom_climate_sensor_humidity"
+    ],
+    "active_schedule": "default",
+    "enabled": true
+  },
+  {
+    "id": "signe",
+    "name": "Signe's room",
+    "thermostats": [
+      "climate.signe_thermostat"
+    ],
+    "temperature_sensors": [
+      "sensor.signe_climate_sensor_temperature"
+    ],
+    "humidity_sensors": [
+      "sensor.signe_climate_sensor_humidity"
+    ],
+    "active_schedule": "default",
+    "enabled": true
+  },
+  {
+    "id": "tv_lounge",
+    "name": "TV Lounge",
+    "thermostats": [
+      "climate.tv_lounge_thermostat"
+    ],
+    "temperature_sensors": [],
+    "humidity_sensors": [],
+    "active_schedule": "default",
+    "enabled": true
+  }
+]
