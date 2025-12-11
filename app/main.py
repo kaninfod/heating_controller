@@ -53,8 +53,9 @@ def setup_logging():
             )
         )
         handlers.append(syslog_handler)
-    except Exception as e:
-        print(f"Warning: Could not configure syslog: {e}")
+    except OSError:
+        # Syslog not available (normal in non-Docker environments)
+        pass
 
     logging.basicConfig(
         level=getattr(logging, settings.log_level), handlers=handlers, force=True
@@ -100,11 +101,16 @@ async def lifespan(app: FastAPI):
 
         # Load thermostat mapping for MQTT publishing
         from app.config import config_loader
+
         thermostat_mapping = config_loader.load_thermostat_mapping()
 
         # Initialize mode manager with area_manager for area-based control
         mode_manager = ModeManager(
-            ha_client, schedule_manager, area_manager, thermostat_mapping, settings.mode_entity
+            ha_client,
+            schedule_manager,
+            area_manager,
+            thermostat_mapping,
+            settings.mode_entity,
         )
 
         # Initialize service container

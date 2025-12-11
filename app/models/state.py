@@ -141,6 +141,9 @@ class SystemMode(str, Enum):
     TIMER = "timer"  # Temporary override with auto-restore
     MANUAL = "manual"  # No automatic control
     OFF = "off"  # All thermostats turned off
+    VENTILATION = (
+        "ventilation"  # Temporary ventilation mode - off for X minutes then restore
+    )
 
 
 class ConnectionStatus(str, Enum):
@@ -162,7 +165,6 @@ class SystemState(BaseModel):
     temperature_sensors: Dict[str, SensorState] = Field(default_factory=dict)
     humidity_sensors: Dict[str, SensorState] = Field(default_factory=dict)
     input_selects: Dict[str, InputSelectState] = Field(default_factory=dict)
-    zones: Dict[str, Zone] = Field(default_factory=dict)
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat() if v else None}

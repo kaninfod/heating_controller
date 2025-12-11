@@ -42,6 +42,9 @@ class ModeManager:
         self.previous_mode = SystemMode.MANUAL
         self.timer_task: Optional[asyncio.Task] = None
         self.timer_restore_time: Optional[datetime] = None
+        self.saved_mode: Optional[SystemMode] = (
+            None  # For ventilation mode to restore previous mode
+        )
 
         # Register callback for mode entity changes from HA
         self.ha_client.register_callback(self._on_ha_state_change)
@@ -187,6 +190,9 @@ class ModeManager:
                 logger.error("Timer mode requires restore_time")
                 return False
             success = await self._apply_timer_mode(restore_time)
+        elif mode == SystemMode.VENTILATION:
+            ventilation_time = kwargs.get("ventilation_time", 5)
+            success = await self._apply_ventilation_mode(ventilation_time)
         elif mode == SystemMode.MANUAL:
             success = await self._apply_manual_mode()
         elif mode == SystemMode.OFF:
@@ -221,6 +227,9 @@ class ModeManager:
             return await self._apply_stay_home_mode(None)
         elif mode == SystemMode.HOLIDAY:
             return await self._apply_holiday_mode()
+        elif mode == SystemMode.VENTILATION:
+            # Ventilation from HA UI uses default 5 minutes
+            return await self._apply_ventilation_mode(5)
         elif mode == SystemMode.MANUAL:
             return await self._apply_manual_mode()
         elif mode == SystemMode.OFF:
@@ -257,6 +266,76 @@ class ModeManager:
             results.extend(area_results.values())
 
         return all(results) if results else True
+
+    async def _apply_ventilation_mode(self, ventilation_time: int = 5) -> bool:
+        """
+        Ventilation mode: Turn off all thermostats for ventilation period, then restore previous mode
+
+        Args:
+            ventilation_time: Duration in minutes (default 5 minutes)
+        """
+        logger.info(
+            f"Applying ventilation mode - thermostats off for {ventilation_time} minutes"
+        )
+
+        # Save current mode to restore after ventilation
+        self.saved_mode = self.previous_mode
+
+        # Turn off all thermostats
+        results = []
+        all_thermostats = set()
+        for area in self.area_manager.get_all_areas():
+            all_thermostats.update(area.thermostats)
+
+        for thermostat_id in all_thermostats:
+            success = await self.ha_client.set_thermostat_mode(thermostat_id, "off")
+            results.append(success)
+
+            if success:
+                logger.info(f"Turned off {thermostat_id} for ventilation")
+
+        # Schedule restoration to previous mode
+        if all(results):
+            restore_time = datetime.now() + timedelta(minutes=ventilation_time)
+            self._schedule_ventilation_restore(restore_time, self.saved_mode)
+
+        return all(results) if results else True
+
+    def _schedule_ventilation_restore(
+        self, restore_time: datetime, restore_mode: SystemMode
+    ):
+        """Schedule restoration of previous mode after ventilation"""
+        # Cancel existing timer if any
+        if self.timer_task:
+            self.timer_task.cancel()
+
+        async def restore_after_ventilation():
+            now = datetime.now()
+            delay = (restore_time - now).total_seconds()
+
+            if delay > 0:
+                logger.info(
+                    f"Ventilation scheduled - will restore to {restore_mode.value} in {delay/60:.1f} minutes"
+                )
+                await asyncio.sleep(delay)
+
+                logger.info(
+                    f"Ventilation complete - restoring to {restore_mode.value} mode"
+                )
+                # Set all thermostats to auto mode first
+                all_thermostats = set()
+                for area in self.area_manager.get_all_areas():
+                    all_thermostats.update(area.thermostats)
+
+                for thermostat_id in all_thermostats:
+                    await self.ha_client.set_thermostat_mode(thermostat_id, "auto")
+
+                # Restore previous mode
+                await self.set_mode(restore_mode)
+            else:
+                logger.warning("Ventilation restore time is in the past")
+
+        self.timer_task = asyncio.create_task(restore_after_ventilation())
 
     async def _apply_stay_home_mode(self, active_areas: Optional[list] = None) -> bool:
         """
@@ -333,13 +412,17 @@ class ModeManager:
                 # Get thermostat mapping to Z2M device name
                 thermostat_config = self.thermostat_mapping.get(thermostat_id)
                 if not thermostat_config:
-                    logger.warning(f"No mapping found for thermostat {thermostat_id}, skipping")
+                    logger.warning(
+                        f"No mapping found for thermostat {thermostat_id}, skipping"
+                    )
                     results.append(False)
                     continue
 
                 z2m_device_name = thermostat_config.get("z2m_name")
                 if not z2m_device_name:
-                    logger.warning(f"No Z2M name configured for {thermostat_id}, skipping")
+                    logger.warning(
+                        f"No Z2M name configured for {thermostat_id}, skipping"
+                    )
                     results.append(False)
                     continue
 
@@ -367,12 +450,20 @@ class ModeManager:
                 if success:
                     logger.info(
                         f"Published stay-home schedule to {thermostat_id} via MQTT",
-                        extra={"thermostat_id": thermostat_id, "z2m_device": z2m_device_name},
+                        extra={
+                            "thermostat_id": thermostat_id,
+                            "z2m_device": z2m_device_name,
+                        },
                     )
                 else:
                     logger.error(f"Failed to publish schedule to {thermostat_id}")
 
                 results.append(success)
+
+        # Schedule auto-restore to default mode at midnight (since stay-home only applies to current day)
+        midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        midnight = midnight + timedelta(days=1)  # Next midnight
+        self._schedule_stay_home_restore(midnight)
 
         return all(results) if results else True
 
@@ -430,11 +521,26 @@ class ModeManager:
 
     async def _apply_manual_mode(self) -> bool:
         """
-        Manual mode: No supervision, thermostats operate independently
-        Just log the change, don't modify thermostat states
+        Manual mode: Thermostats operate in heat mode independently
+        Sets all thermostats to 'heat' so they don't follow any schedule
         """
-        logger.info("Applying manual mode - no supervision")
-        return True
+        logger.info("Applying manual mode - setting all thermostats to heat mode")
+
+        results = []
+        all_thermostats = set()
+        for area in self.area_manager.get_all_areas():
+            all_thermostats.update(area.thermostats)
+
+        for thermostat_id in all_thermostats:
+            success = await self.ha_client.set_thermostat_mode(thermostat_id, "heat")
+            results.append(success)
+
+            if success:
+                logger.info(f"Set {thermostat_id} to heat mode (manual)")
+            else:
+                logger.error(f"Failed to set {thermostat_id} to heat mode")
+
+        return all(results) if results else True
 
     async def _apply_off_mode(self) -> bool:
         """
@@ -457,6 +563,33 @@ class ModeManager:
                 logger.error(f"Failed to turn off {thermostat_id}")
 
         return all(results) if results else True
+
+    def _schedule_stay_home_restore(self, restore_time: datetime):
+        """Schedule restoration to default mode at midnight (since stay-home only applies to current day)"""
+        # Don't overwrite ventilation task, only schedule if no other task is running
+        if self.timer_task and self.current_mode == SystemMode.VENTILATION:
+            return
+
+        async def restore_at_midnight():
+            now = datetime.now()
+            delay = (restore_time - now).total_seconds()
+
+            if delay > 0:
+                hours_until_midnight = delay / 3600
+                logger.info(
+                    f"Stay-home scheduled - will restore to default at midnight in {hours_until_midnight:.1f} hours"
+                )
+                await asyncio.sleep(delay)
+
+                if self.current_mode == SystemMode.STAY_HOME:
+                    logger.info(
+                        "Midnight reached - restoring from stay-home to default mode"
+                    )
+                    await self.set_mode(SystemMode.DEFAULT)
+            else:
+                logger.warning("Midnight restore time is in the past")
+
+        self.timer_task = asyncio.create_task(restore_at_midnight())
 
     def _schedule_timer_restore(self, restore_time: datetime):
         """Schedule automatic restoration to default mode"""
