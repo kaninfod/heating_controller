@@ -1,33 +1,58 @@
 {
-  "name": "RPi API Dev Env",
+  "name": "Heating Controller Dev",
   "build": {
-    "dockerfile": "Dockerfile"
+    "dockerfile": "Dockerfile",
+    "context": ".."
   },
   
-  // Set the workspace folder
-  "workspaceFolder": "/workspaces",
+  // Mount the workspace into the container
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
 
-  // Configure tool-specific properties.
+  // Mount additional folders if needed (data, logs, config are preserved)
+  "mounts": [
+    "source=${localWorkspaceFolder}/data,target=/workspace/data,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/logs,target=/workspace/logs,type=bind,consistency=cached"
+  ],
+
+  // VS Code customizations
   "customizations": {
     "vscode": {
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
         "python.linting.enabled": true,
         "python.linting.pylintEnabled": true,
-        "editor.formatOnSave": true
+        "python.formatting.provider": "black",
+        "editor.formatOnSave": true,
+        "files.watcherExclude": {
+          "**/.git/objects/**": true,
+          "**/.git/subtree-cache/**": true,
+          "**/node_modules/**": true,
+          "**/__pycache__/**": true,
+          "**/.pytest_cache/**": true
+        }
       },
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
-        "njpwerner.autodocstring" 
+        "ms-python.black-formatter",
+        "njpwerner.autodocstring"
       ]
     }
   },
 
-  // This command runs after the container is created.
-  // It automatically installs your pip requirements.
-  "postCreateCommand": "pip install --upgrade pip && if [ -f requirements.txt ]; then pip install -r requirements.txt; fi",
+  // Install Python dependencies after container is created
+  "postCreateCommand": "pip install --upgrade pip && pip install -r requirements.txt",
 
-  // Connect as root (simple setup)
-  "remoteUser": "root"
+  // Use root user to avoid permission issues
+  "remoteUser": "root",
+
+  // Forward ports for the API
+  "forwardPorts": [8321],
+  "portsAttributes": {
+    "8000": {
+      "label": "FastAPI Server",
+      "onAutoForward": "notify"
+    }
+  }
 }

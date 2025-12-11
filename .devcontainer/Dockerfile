@@ -1,23 +1,20 @@
-# We use python:3.11-slim-bookworm to match the current RPi OS version.
-# If you are on an Apple Silicon Mac, this will naturally run as ARM64 
-# (same architecture as the Pi), making it incredibly fast.
+# Use Python 3.11 slim image based on Debian Bookworm
+# This matches Raspberry Pi OS and runs natively on Apple Silicon (ARM64)
 FROM python:3.11-slim-bookworm
 
-# Prevent Python from writing pyc files and buffering stdout
+# Prevent Python from writing .pyc files and enable unbuffered output
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies. 
-# "build-essential" is often needed to compile python libraries (like numpy or GPIO wrappers)
-# "curl" and "git" are standard dev tools.
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user (optional but recommended for security/best practice)
-# VS Code handles the user mapping automatically if we stick to root, 
-# but let's keep it simple for now and run as root inside the container 
-# so you don't hit permission issues while learning.
+# Set working directory
 WORKDIR /workspace
+
+# Keep container running
+CMD ["sleep", "infinity"]
