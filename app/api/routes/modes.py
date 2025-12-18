@@ -20,8 +20,9 @@ class SetModeRequest(BaseModel):
     mode: str
     active_areas: Optional[list[str]] = None  # For stay_home mode
     ventilation_time: Optional[int] = Field(
-        None, ge=1, le=60
-    )  # 1-60 minutes, default 5
+        None, le=60
+    )  # 1-60 minutes if provided, 0 or None means ignore
+    force: Optional[bool] = False  # Force re-apply mode even if already set
 
 
 @router.get("")
@@ -84,15 +85,25 @@ async def set_mode(request: SetModeRequest, mode_manager: ModeManagerDep):
 
     kwargs = {}
     if mode == SystemMode.STAY_HOME:
-        kwargs["active_areas"] = request.active_areas
+        # Treat empty list as None (all areas active)
+        if request.active_areas is not None and len(request.active_areas) == 0:
+            kwargs["active_areas"] = None
+        else:
+            kwargs["active_areas"] = request.active_areas
     if mode == SystemMode.VENTILATION:
-        # Use provided ventilation_time or default to 5
-        ventilation_time = request.ventilation_time or 5
-        kwargs["ventilation_time"] = ventilation_time
+        # Only use ventilation_time if provided and > 0, else use default 5
+        if request.ventilation_time and request.ventilation_time > 0:
+            kwargs["ventilation_time"] = request.ventilation_time
+        else:
+            kwargs["ventilation_time"] = 5
 
-    success = await mode_manager.set_mode(mode, **kwargs)
+    force = getattr(request, "force", False)
+    success = await mode_manager.set_mode(mode, force=force, **kwargs)
+
 
     if not success:
+        if not force and mode == mode_manager.get_current_mode():
+            raise HTTPException(status_code=409, detail=f"Mode {mode.value} is already set")
         raise HTTPException(status_code=500, detail=f"Failed to set {mode.value}")
 
     return {

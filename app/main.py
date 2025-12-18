@@ -26,44 +26,33 @@ from app.dependencies import services
 def setup_logging():
     """Configure logging with file, console, and syslog handlers"""
     handlers = []
-
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    )
-    handlers.append(console_handler)
-
-    # File handler
-    os.makedirs("logs", exist_ok=True)
-    file_handler = logging.FileHandler("logs/app.log")
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    )
-    handlers.append(file_handler)
-
-    # Syslog handler (works in Docker)
-    try:
-        syslog_handler = logging.handlers.SysLogHandler(
-            address=(settings.syslog_host, settings.syslog_port)
+        
+    # Determine environment (default to production for safety)
+    env = os.getenv("ENVIRONMENT", "production").lower()
+    
+    if env == "development":
+        # Dev:  Full timestamps, detailed format for console debugging
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         )
-        syslog_handler.setFormatter(
-            logging.Formatter(
-                "heating-control[%(process)d]: %(name)s - %(levelname)s - %(message)s"
-            )
+        handlers.append(console_handler)
+        
+    else:
+        # Production: Clean format for Docker/syslog (no timestamp, rsyslog adds it)
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(
+            logging.Formatter("%(name)s - %(levelname)s - %(message)s")
         )
-        handlers.append(syslog_handler)
-    except OSError:
-        # Syslog not available (normal in non-Docker environments)
-        pass
+        handlers.append(console_handler)
 
     logging.basicConfig(
-        level=getattr(logging, settings.log_level), handlers=handlers, force=True
+        level=getattr(logging, settings.log_level), 
+        handlers=handlers, 
+        force=True
     )
 
-    # Silence watchfiles logger
-    logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
-
+    logging.getLogger("watchfiles. main").setLevel(logging.WARNING) 
 
 setup_logging()
 logger = logging.getLogger(__name__)

@@ -46,10 +46,10 @@ class ModeManager:
             None  # For ventilation mode to restore previous mode
         )
 
-        # Register callback for mode entity changes from HA
-        self.ha_client.register_callback(self._on_ha_state_change)
-
-        logger.info(f"Mode Manager initialized with persistence to {mode_entity_id}")
+        # Unidirectional sync: only sync controller state to HA on startup
+        logger.info(
+            f"Mode Manager initialized with unidirectional persistence to {mode_entity_id}"
+        )
 
     async def _sync_mode_to_ha(self, mode: SystemMode) -> bool:
         """Sync current mode to Home Assistant input_select entity"""
@@ -75,28 +75,7 @@ class ModeManager:
             )
             return False
 
-    async def _on_ha_state_change(self, entity_id: str, new_state: dict):
-        """Callback for HA state changes - detect mode changes from HA UI"""
-        if entity_id == self.mode_entity_id:
-            new_mode_value = new_state.get("state")
-            if new_mode_value:
-                try:
-                    new_mode = SystemMode(new_mode_value)
-                    if new_mode != self.current_mode:
-                        logger.info(
-                            f"Mode changed in HA UI from {self.current_mode.value} to {new_mode_value}",
-                            extra={
-                                "old_mode": self.current_mode.value,
-                                "new_mode": new_mode_value,
-                            },
-                        )
-                        # Apply the mode change (but don't sync back to HA to avoid loop)
-                        await self._apply_mode_without_sync(new_mode)
-                except ValueError:
-                    logger.warning(
-                        f"Invalid mode value from HA: {new_mode_value}",
-                        extra={"mode_value": new_mode_value},
-                    )
+    # Bidirectional sync removed: input_select changes in HA will NOT change controller mode
 
     async def restore_mode_from_ha(self) -> bool:
         """Restore mode from Home Assistant on startup"""
@@ -160,7 +139,7 @@ class ModeManager:
         """Get the current system mode"""
         return self.current_mode
 
-    async def set_mode(self, mode: SystemMode, **kwargs) -> bool:
+    async def set_mode(self, mode: SystemMode, force: bool = False, **kwargs) -> bool:
         """
         Set system mode and apply changes to all thermostats
 
@@ -168,6 +147,10 @@ class ModeManager:
         - restore_time (datetime): For timer mode
         - active_areas (list): For stay_home mode
         """
+        if not force and mode == self.current_mode:
+            logger.info(f"Mode {mode} is already set. Skipping (force={force}).")
+            return False
+
         logger.info(f"Switching from {self.current_mode} to {mode}")
 
         self.previous_mode = self.current_mode

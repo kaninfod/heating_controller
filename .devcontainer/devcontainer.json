@@ -48,7 +48,7 @@
   "remoteUser": "root",
 
   // Forward ports for the API
-  "forwardPorts": [8321],
+  "forwardPorts": [8000],
   "portsAttributes": {
     "8000": {
       "label": "FastAPI Server",
