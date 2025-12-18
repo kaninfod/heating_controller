@@ -3,7 +3,7 @@
   "name": "Holiday/Away Schedule",
   "description": "Minimal heating when away - maintain 16°C to prevent freezing",
   "enabled": true,
-  "weekly_schedule": {
+  "week": {
     "monday": "00:00/16",
     "tuesday": "00:00/16",
     "wednesday": "00:00/16",

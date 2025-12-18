@@ -3,7 +3,7 @@
   "name": "Stay Home Schedule",
   "description": "Comfortable temperatures all day when staying home",
   "enabled": true,
-  "weekly_schedule": {
+  "week": {
     "monday": "00:00/18 07:00/21 23:00/18",
     "tuesday": "00:00/18 07:00/21 23:00/18",
     "wednesday": "00:00/18 07:00/21 23:00/18",

@@ -3,7 +3,7 @@
   "name": "Weekend Schedule",
   "description": "Relaxed weekend schedule with later wake times",
   "enabled": true,
-  "weekly_schedule": {
+  "week": {
     "monday": "00:00/17 06:30/19 07:00/20 09:30/17 16:00/21 23:00/17",
     "tuesday": "00:00/17 06:30/19 07:00/20 09:30/17 16:00/21 23:00/17",
     "wednesday": "00:00/17 06:30/19 07:00/20 09:30/17 16:00/21 23:00/17",
