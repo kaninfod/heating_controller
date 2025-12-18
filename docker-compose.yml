@@ -15,8 +15,8 @@ services:
     
     # Mount only config/data, not source code
     volumes: 
-      - ./config:/app/config: ro
-      - ./data:/app/data
+      - /home/pi/heating_controller/config:/app/config
+      - /home/pi/heating_controller/data:/app/data
     
     networks:
       - unified_network
