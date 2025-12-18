@@ -1,37 +1,34 @@
 version: '3.8'
 
 services:
-  heating-controller:
-    image: python:3.11-slim
+  heating-controller: 
+    image: ghcr.io/kaninfod/heating_controller:latest  # Replace with your repo name
     container_name: heating-controller
     restart: unless-stopped
-    
-    working_dir: /app
-    
-    volumes:
-      - /home/pi/heating_controller:/app
     
     ports:
       - "8321:8321"
     
     environment:
       - PYTHONUNBUFFERED=1
+      - ENVIRONMENT=production  # Set your environment
     
-    command: >
-      sh -c "
-      pip install --no-cache-dir -r requirements.txt &&
-      python -m uvicorn app.main:app --host 0.0.0.0 --port 8321
-      "
+    # Mount only config/data, not source code
+    volumes: 
+      - ./config:/app/config: ro
+      - ./data:/app/data
     
     networks:
-      - default
+      - unified_network
     
     logging:
-      driver: "json-file"
+      driver: syslog
       options:
-        max-size: "10m"
-        max-file: "3"
+        syslog-address: "udp://192.168.68.102:514"
+        tag: "HEATING"
+        syslog-facility: "daemon"
+        syslog-format: "rfc5424"
 
 networks:
-  default:
-    driver: bridge
+  unified_network:
+    external:  true
