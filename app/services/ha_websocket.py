@@ -357,6 +357,10 @@ class HomeAssistantWebSocket:
             "service_data": combined_data,
         }
 
+        # Add debug log for payload and entity_id
+        logger.debug(f"[call_service] domain={domain}, service={service}, entity_id='{entity_id}', service_data={service_data}")
+        logger.debug(f"[call_service] Full payload: {payload}")
+
         try:
             payload_str = json.dumps(payload)
             logger.debug(f"Sending WebSocket payload: {payload_str}")
@@ -392,6 +396,7 @@ class HomeAssistantWebSocket:
 
     async def set_input_select_option(self, entity_id: str, option: str) -> bool:
         """Set input_select option (used for mode persistence)"""
+        logger.debug(f"[set_input_select_option] entity_id='{entity_id}', option='{option}'")
         return await self.call_service(
             "input_select", "select_option", entity_id, {"option": option}
         )

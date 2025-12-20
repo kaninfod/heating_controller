@@ -1,145 +1,168 @@
-# Heating Control System
 
-Central heating control system for Raspberry Pi to supervise 6 TRVZB thermostats via Home Assistant.
+docker run -d -p 8321:8321 \
+# Heating Controller API — User Guide
 
-## Features
+Easily automate and control your Zigbee TRVZB thermostats and heating zones via a simple REST API. This system integrates with Home Assistant (HA) for real-time monitoring and advanced scheduling, but you interact with it using a modern, documented API.
 
-- **Real-time monitoring** of thermostats, temperature sensors, and humidity sensors via Home Assistant WebSocket
-- **Zone management** - Group thermostats into logical zones
-- **Schedule management** - Define and apply heating schedules to zones
-- **System modes** - Holiday, stay-home, timer, and other supervisory modes (coming soon)
-- **REST API** - Control and monitor your heating system
+---
 
-## Quick Start
+## What Can You Do With This API?
 
-### 1. Install Dependencies
+- Set your home’s heating mode (e.g. holiday, stay-home, off, timer, ventilation)
+- Get the current system mode and status of all zones/thermostats
+- Change which rooms are heated and when, using flexible schedules
+- Integrate with your own apps, automations, or dashboards
 
-```bash
-pip install -r requirements.txt
-```
+---
 
-### 2. Configure Environment
+## Quick Start for API Users
 
-Copy `.env.example` to `.env` and update with your Home Assistant details:
+### 1. Deploy the Controller
 
-```bash
-cp .env.example .env
-```
+**Recommended:** Use Docker Compose (see below). The API will be available on port 8321 by default.
 
-Edit `.env`:
-- Set `HA_WEBSOCKET_URL` to your Home Assistant WebSocket URL
-- Set `HA_ACCESS_TOKEN` to your long-lived access token
-- Update entity IDs for your thermostats and sensors
+### 2. Connect to the API
 
-### 3. Configure Zones
+- OpenAPI docs: [http://localhost:8321/docs](http://localhost:8321/docs)
+- All endpoints are unauthenticated by default (unless you add a proxy or auth layer)
 
-Edit `config/zones.json` to define your heating zones and assign thermostats/sensors to each zone.
+### 3. Set Up Your Heating Zones and Schedules
 
-### 4. Create Schedules
+Edit the config files (see below) to match your home. Restart the container after changes.
 
-Add schedule files to `config/schedules/`. Each schedule is a JSON file with the TRVZB weekly schedule format.
+---
 
-Example schedules are provided:
-- `weekday_work.json` - Workday schedule
-- `weekend.json` - Weekend schedule
-- `holiday.json` - Away/holiday minimal heating
-- `stay_home.json` - All-day comfort heating
+## Example API Usage
 
-### 5. Run the Application
+### Get Current System Mode
 
 ```bash
-python -m app.main
+curl http://localhost:8321/api/modes/current
 ```
 
-Or with uvicorn:
+### Set System Mode (e.g. Holiday)
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+curl -X POST http://localhost:8321/api/modes/set \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "holiday"}'
 ```
 
-### 6. Access the API
+### Set Stay Home Mode for Specific Areas
 
-- **API Documentation**: http://localhost:8000/docs
-- **Status Endpoint**: http://localhost:8000/api/status
-
-## API Endpoints
-
-### Status
-- `GET /api/status` - Full system status (all thermostats, sensors, zones)
-- `GET /api/status/thermostats` - All thermostats
-- `GET /api/status/thermostats/{entity_id}` - Specific thermostat
-- `GET /api/status/sensors/temperature` - All temperature sensors
-- `GET /api/status/sensors/humidity` - All humidity sensors
-- `GET /api/status/connection` - Home Assistant connection status
-
-### Health
-- `GET /health` - Application health check
-
-## Project Structure
-
-```
-/workspace/
-├── app/
-│   ├── main.py                 # FastAPI application
-│   ├── config.py               # Configuration loader
-│   ├── models/
-│   │   └── state.py           # Data models
-│   ├── services/
-│   │   └── ha_websocket.py    # Home Assistant WebSocket client
-│   ├── core/                  # Business logic (future)
-│   └── api/
-│       └── routes/
-│           └── status.py      # Status API routes
-├── config/
-│   ├── zones.json            # Zone definitions
-│   └── schedules/            # Schedule files
-├── data/
-│   └── state.json           # Runtime state (auto-generated)
-├── logs/
-│   └── app.log             # Application logs
-├── .env                     # Configuration (create from .env.example)
-└── requirements.txt         # Python dependencies
+```bash
+curl -X POST http://localhost:8321/api/modes/set \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "stay_home", "active_areas": ["bedroom", "kitchen"]}'
 ```
 
-## TRVZB Schedule Format
+### List Available Modes
 
-Schedules use the TRVZB format: `"HH:MM/TEMP HH:MM/TEMP ..."`
+```bash
+curl http://localhost:8321/api/modes
+```
 
-Example:
+### Get Full System Status
+
+```bash
+curl http://localhost:8321/api/modes/status
+```
+
+---
+
+## How to Configure Your System
+
+### 1. Home Assistant Connection
+
+Create a `.env` file (see `.env.example`) and set:
+- `HA_WEBSOCKET_URL` (e.g. `ws://homeassistant.local:8123/api/websocket`)
+- `HA_ACCESS_TOKEN` (long-lived token from HA profile)
+
+### 2. Define Your Zones
+
+Edit `config/zones.json` to list each room/zone, thermostats, and sensors. Example:
 ```json
-"monday": "00:00/17 06:30/19 07:00/20 09:30/17 16:00/21 23:00/17"
+[
+  {
+    "id": "bedroom",
+    "name": "Bedroom",
+    "thermostats": ["climate.bedroom_thermostat"],
+    "temperature_sensors": ["sensor.bedroom_temp"],
+    "humidity_sensors": ["sensor.bedroom_humidity"],
+    "active_schedule": "default",
+    "enabled": true
+  }
+]
 ```
 
-This means:
-- 00:00 - Set to 17°C
-- 06:30 - Set to 19°C
-- 07:00 - Set to 20°C
-- 09:30 - Set to 17°C
-- 16:00 - Set to 21°C
-- 23:00 - Set to 17°C
+### 3. Set Up Schedules
 
-## Development Status
+Each file in `config/schedules/` defines a schedule. Use the `week` key (not `weekly_schedule`). Example:
+```json
+{
+  "id": "default",
+  "name": "Default",
+  "description": "Standard work week schedule",
+  "week": {
+    "monday": "workday",
+    "tuesday": "workday",
+    "wednesday": "workday",
+    "thursday": "workday",
+    "friday": "workday",
+    "saturday": "weekend_day",
+    "sunday": "weekend_day"
+  }
+}
+```
+Day types (see `config/day_types.json`) define the actual time/temperature strings for each day type.
 
-### Phase 1 (Current) ✓
-- [x] Home Assistant WebSocket connection
-- [x] Real-time entity monitoring
-- [x] Status API endpoints
-- [x] Configuration management
+### 4. Map Thermostats
 
-### Phase 2 (Planned)
-- [ ] Zone orchestration
-- [ ] Schedule distribution to thermostats
-- [ ] Schedule management API
+Edit `config/thermostat_mapping.json` to map logical thermostat IDs to Zigbee2MQTT device names.
 
-### Phase 3 (Planned)
-- [ ] System modes (holiday, stay-home, timer)
-- [ ] Mode management API
+---
 
-### Phase 4 (Planned)
-- [ ] Bathroom fan control
-- [ ] Advanced automation rules
+## Home Assistant Integration (What to Expect)
+
+- The controller updates HA’s input_select to reflect the current mode, but changes in HA do NOT change the controller’s mode.
+- All thermostats, sensors, and input_selects must exist in HA and be mapped in your config files.
+- Schedules are pushed to TRVs via Zigbee2MQTT.
+
+---
+
+## Deployment (for API Users)
+
+### Docker Compose (Recommended)
+
+1. Edit `docker-compose.yml` to mount your config and data directories.
+2. Start the service:
+   ```bash
+   docker-compose up -d
+   ```
+3. The API will be available on port 8321.
+
+### Manual Docker
+
+```bash
+docker build -t heating_controller .
+
+  -v $(pwd)/config:/app/config \
+  -v $(pwd)/data:/app/data \
+  heating_controller
+```
+
+---
+
+## Troubleshooting for API Users
+
+- **Schedule validation errors:** Make sure all schedule files use the `week` key, not `weekly_schedule`.
+- **HA connection issues:** Double-check `.env` and your HA token permissions.
+- **Mode not changing in HA:** Only controller-originated changes sync to HA.
+- **API not responding:** Check container logs and ensure port 8321 is open.
+
+---
 
 ## License
 
 MIT
-# heating_controller
+

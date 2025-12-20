@@ -59,7 +59,7 @@ class ModeManager:
             )
             if success:
                 logger.info(
-                    f"Synced mode to HA: {mode.value}",
+                    f"Synced mode to HA: {mode.value} input_select: {self.mode_entity_id}",
                     extra={"mode": mode.value, "entity_id": self.mode_entity_id},
                 )
             else:
