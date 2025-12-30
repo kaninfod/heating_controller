@@ -1,3 +1,4 @@
+
 """
 Mode Manager Service
 Manages high-level system operating modes and orchestrates changes across all zones
@@ -80,7 +81,6 @@ class ModeManager:
     async def restore_mode_from_ha(self) -> bool:
         """Restore mode from Home Assistant on startup"""
         try:
-            # Get current state from HA
             input_selects = self.ha_client.system_state.input_selects
             logger.debug(
                 f"Input selects in state: {list(input_selects.keys())}",
@@ -100,7 +100,6 @@ class ModeManager:
                     try:
                         restored_mode = SystemMode(mode_value)
 
-                        # Check if mode is already set (avoid re-applying on restart)
                         if restored_mode == self.current_mode:
                             logger.info(
                                 f"Mode already set to {mode_value}, skipping re-apply",
@@ -112,8 +111,8 @@ class ModeManager:
                             f"Restoring mode from HA: {mode_value}",
                             extra={"mode": mode_value},
                         )
-                        # Apply mode without syncing back to HA
-                        await self._apply_mode_without_sync(restored_mode)
+                        # Use set_mode with sync_to_ha=False
+                        await self.set_mode(restored_mode, sync_to_ha=False)
                         return True
                     except ValueError:
                         logger.warning(
@@ -124,7 +123,6 @@ class ModeManager:
                 logger.info(
                     f"Mode entity {self.mode_entity_id} not found in state, defaulting to {self.current_mode.value}"
                 )
-                # Sync current default mode to HA
                 await self._sync_mode_to_ha(self.current_mode)
         except Exception as e:
             logger.error(
@@ -139,7 +137,7 @@ class ModeManager:
         """Get the current system mode"""
         return self.current_mode
 
-    async def set_mode(self, mode: SystemMode, force: bool = False, **kwargs) -> bool:
+    async def set_mode(self, mode: SystemMode, force: bool = False, sync_to_ha: bool = True, **kwargs) -> bool:
         """
         Set system mode and apply changes to all thermostats
 
@@ -186,48 +184,19 @@ class ModeManager:
 
         if success:
             logger.info(f"Successfully switched to {mode}")
-            # Sync mode to Home Assistant
-            await self._sync_mode_to_ha(mode)
+            if sync_to_ha:
+                await self._sync_mode_to_ha(mode)
         else:
             logger.error(f"Failed to switch to {mode}")
             self.current_mode = self.previous_mode  # Rollback
 
         return success
 
-    async def _apply_mode_without_sync(self, mode: SystemMode, **kwargs) -> bool:
-        """Apply mode change without syncing to HA (used when change originates from HA)"""
-        logger.info(f"Applying mode from HA: {mode}")
-
-        self.previous_mode = self.current_mode
-        self.current_mode = mode
-        self.ha_client.system_state.system_mode = mode
-
-        # Apply mode-specific logic
-        if mode == SystemMode.DEFAULT:
-            return await self._apply_default_mode()
-        elif mode == SystemMode.STAY_HOME:
-            # For stay_home from HA, apply to all zones by default
-            return await self._apply_stay_home_mode(None)
-        elif mode == SystemMode.HOLIDAY:
-            return await self._apply_holiday_mode()
-        elif mode == SystemMode.VENTILATION:
-            # Ventilation from HA UI uses default 5 minutes
-            return await self._apply_ventilation_mode(5)
-        elif mode == SystemMode.MANUAL:
-            return await self._apply_manual_mode()
-        elif mode == SystemMode.OFF:
-            return await self._apply_off_mode()
-        elif mode == SystemMode.TIMER:
-            # Timer from HA UI won't have restore_time, just turn off
-            logger.warning("Timer mode from HA without restore_time, just turning off")
-            return await self._apply_off_mode()
-        else:
-            logger.error(f"Unknown mode: {mode}")
-            return False
+    # _apply_mode_without_sync removed; use set_mode(sync_to_ha=False) instead
 
     async def _apply_default_mode(self) -> bool:
         """
-        Default mode: Apply 'default' schedule to all areas
+        Default mode: Set HVAC to 'auto' and apply 'default' schedule to all areas
         """
         logger.info("Applying default mode - normal work week schedule")
 
@@ -241,11 +210,15 @@ class ModeManager:
             if not area.enabled:
                 continue
 
+            # Set HVAC mode for all thermostats in area
+            hvac_success = await self.set_area_hvac_mode(area, "auto")
+            if not hvac_success:
+                logger.error(f"Failed to set HVAC mode for area {area.name}")
             # Apply default schedule to all thermostats in area
             area_results = await self.schedule_manager.apply_schedule_to_area(
                 self.ha_client, self.area_manager, area.area_id, "default"
             )
-
+            results.append(hvac_success)
             results.extend(area_results.values())
 
         return all(results) if results else True
@@ -264,18 +237,16 @@ class ModeManager:
         # Save current mode to restore after ventilation
         self.saved_mode = self.previous_mode
 
-        # Turn off all thermostats
+
+        # Turn off all thermostats using helper
         results = []
         all_thermostats = set()
         for area in self.area_manager.get_all_areas():
             all_thermostats.update(area.thermostats)
 
         for thermostat_id in all_thermostats:
-            success = await self.ha_client.set_thermostat_mode(thermostat_id, "off")
+            success = await self.set_thermostat_hvac_mode(thermostat_id, "off")
             results.append(success)
-
-            if success:
-                logger.info(f"Turned off {thermostat_id} for ventilation")
 
         # Schedule restoration to previous mode
         if all(results):
@@ -326,9 +297,6 @@ class ModeManager:
         - active_areas: areas to heat (swap to weekend), others stay on default
         - if None, all areas get swapped schedule
         """
-        import json
-        import re
-
         weekday_names = [
             "monday",
             "tuesday",
@@ -366,8 +334,8 @@ class ModeManager:
         # Generate default week schedule for inactive areas
         default_week = self.schedule_manager.generator.generate_week_schedule(base_week)
 
-        results = []
 
+        results = []
         for area in self.area_manager.get_all_areas():
             if not area.enabled:
                 continue
@@ -382,66 +350,20 @@ class ModeManager:
                 schedule_data = default_week
                 logger.info(f"Applying default schedule to {area.name} (inactive)")
 
-            # Apply to each thermostat in area
+            # Log the actual schedule for the current day being sent
+            current_day_schedule = schedule_data.get(current_day, None)
+            logger.info(f"Schedule for {area.name} on {current_day}: {current_day_schedule}")
+
+            # Set HVAC mode for all thermostats in area
+            hvac_success = await self.set_area_hvac_mode(area, "auto")
+            if not hvac_success:
+                logger.error(f"Failed to set HVAC mode for area {area.name}")
+            results.append(hvac_success)
+
+            # Apply schedule to all thermostats in area using publish_schedule_to_thermostat
             for thermostat_id in area.thermostats:
-                # Set to auto mode first
-                await self.ha_client.set_thermostat_mode(thermostat_id, "auto")
-
-                # Log what we're about to send
-                logger.debug(
-                    f"Applying schedule to {thermostat_id}: thursday={schedule_data.get('thursday', 'NOT FOUND')}"
-                )
-
-                # Get thermostat mapping to Z2M device name
-                thermostat_config = self.thermostat_mapping.get(thermostat_id)
-                if not thermostat_config:
-                    logger.warning(
-                        f"No mapping found for thermostat {thermostat_id}, skipping"
-                    )
-                    results.append(False)
-                    continue
-
-                z2m_device_name = thermostat_config.get("z2m_name")
-                if not z2m_device_name:
-                    logger.warning(
-                        f"No Z2M name configured for {thermostat_id}, skipping"
-                    )
-                    results.append(False)
-                    continue
-
-                # Validate device name (prevent injection)
-                if not re.match(r"^[a-z0-9\s\(\)]+$", z2m_device_name):
-                    logger.error(f"Invalid Z2M device name: {z2m_device_name}")
-                    results.append(False)
-                    continue
-
-                # Publish schedule via MQTT to Zigbee2MQTT
-                mqtt_topic = f"zigbee2mqtt/{z2m_device_name}/set"
-                mqtt_payload = json.dumps({"weekly_schedule": schedule_data})
-
-                logger.debug(f"Publishing to {mqtt_topic}: {mqtt_payload[:100]}...")
-
-                success = await self.ha_client.call_service(
-                    domain="mqtt",
-                    service="publish",
-                    service_data={
-                        "topic": mqtt_topic,
-                        "payload": mqtt_payload,
-                    },
-                )
-
-                if success:
-                    logger.info(
-                        f"Published stay-home schedule to {thermostat_id} via MQTT",
-                        extra={
-                            "thermostat_id": thermostat_id,
-                            "z2m_device": z2m_device_name,
-                        },
-                    )
-                else:
-                    logger.error(f"Failed to publish schedule to {thermostat_id}")
-
-                results.append(success)
+                publish_success = await self.publish_schedule_to_thermostat(thermostat_id, schedule_data)
+                results.append(publish_success)
 
         # Schedule auto-restore to default mode at midnight (since stay-home only applies to current day)
         midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -452,7 +374,7 @@ class ModeManager:
 
     async def _apply_holiday_mode(self) -> bool:
         """
-        Holiday mode: Apply eco schedule to all areas
+        Holiday mode: Set HVAC to 'auto' and apply eco schedule to all areas
         """
         logger.info("Applying holiday mode - eco schedule for all areas")
 
@@ -466,11 +388,15 @@ class ModeManager:
             if not area.enabled:
                 continue
 
+            # Set HVAC mode for all thermostats in area
+            hvac_success = await self.set_area_hvac_mode(area, "auto")
+            if not hvac_success:
+                logger.error(f"Failed to set HVAC mode for area {area.name}")
             # Apply eco schedule to all thermostats in area
             area_results = await self.schedule_manager.apply_schedule_to_area(
                 self.ha_client, self.area_manager, area.area_id, "eco"
             )
-
+            results.append(hvac_success)
             results.extend(area_results.values())
 
         return all(results) if results else True
@@ -515,13 +441,8 @@ class ModeManager:
             all_thermostats.update(area.thermostats)
 
         for thermostat_id in all_thermostats:
-            success = await self.ha_client.set_thermostat_mode(thermostat_id, "heat")
+            success = await self.set_thermostat_hvac_mode(thermostat_id, "heat")
             results.append(success)
-
-            if success:
-                logger.info(f"Set {thermostat_id} to heat mode (manual)")
-            else:
-                logger.error(f"Failed to set {thermostat_id} to heat mode")
 
         return all(results) if results else True
 
@@ -537,13 +458,8 @@ class ModeManager:
             all_thermostats.update(area.thermostats)
 
         for thermostat_id in all_thermostats:
-            success = await self.ha_client.set_thermostat_mode(thermostat_id, "off")
+            success = await self.set_thermostat_hvac_mode(thermostat_id, "off")
             results.append(success)
-
-            if success:
-                logger.info(f"Turned off {thermostat_id}")
-            else:
-                logger.error(f"Failed to turn off {thermostat_id}")
 
         return all(results) if results else True
 
@@ -625,3 +541,78 @@ class ModeManager:
             info["timer_remaining_seconds"] = max(0, int(remaining))
 
         return info
+    
+    async def set_thermostat_hvac_mode(self, thermostat_id: str, hvac_mode: str) -> bool:
+        """
+        Set the HVAC mode (off, heat, auto) for a thermostat via Home Assistant.
+        Handles logging and error handling.
+        """
+        success = await self.ha_client.set_thermostat_mode(thermostat_id, hvac_mode)
+        if success:
+            logger.info(f"Set {thermostat_id} to {hvac_mode} mode")
+        else:
+            logger.error(f"Failed to set {thermostat_id} to {hvac_mode} mode")
+        return success
+
+    async def publish_schedule_to_thermostat(self, thermostat_id: str, schedule_data: dict) -> bool:
+        """
+        Publish a weekly schedule to a thermostat via Home Assistant (MQTT)
+        Handles mapping, validation, topic/payload construction, and logging.
+        """
+        import json
+        import re
+
+        # Get thermostat mapping to Z2M device name
+        thermostat_config = self.thermostat_mapping.get(thermostat_id)
+        if not thermostat_config:
+            logger.warning(f"No mapping found for thermostat {thermostat_id}, skipping")
+            return False
+
+        z2m_device_name = thermostat_config.get("z2m_name")
+        if not z2m_device_name:
+            logger.warning(f"No Z2M name configured for {thermostat_id}, skipping")
+            return False
+
+        # Validate device name (prevent injection)
+        if not re.match(r"^[a-z0-9\s\(\)]+$", z2m_device_name):
+            logger.error(f"Invalid Z2M device name: {z2m_device_name}")
+            return False
+
+        # Publish schedule via MQTT to Zigbee2MQTT
+        mqtt_topic = f"zigbee2mqtt/{z2m_device_name}/set"
+        mqtt_payload = json.dumps({"weekly_schedule": schedule_data})
+
+        logger.debug(f"Publishing to {mqtt_topic}: {mqtt_payload[:100]}...")
+
+        success = await self.ha_client.call_service(
+            domain="mqtt",
+            service="publish",
+            service_data={
+                "topic": mqtt_topic,
+                "payload": mqtt_payload,
+            },
+        )
+
+        if success:
+            logger.info(
+                f"Published schedule to {thermostat_id} via MQTT",
+                extra={
+                    "thermostat_id": thermostat_id,
+                    "z2m_device": z2m_device_name,
+                },
+            )
+        else:
+            logger.error(f"Failed to publish schedule to {thermostat_id}")
+
+        return success
+    
+    async def set_area_hvac_mode(self, area, hvac_mode: str) -> bool:
+        """
+        Set the HVAC mode for all thermostats in an area.
+        Returns True if all succeeded, False otherwise.
+        """
+        results = []
+        for thermostat_id in area.thermostats:
+            success = await self.set_thermostat_hvac_mode(thermostat_id, hvac_mode)
+            results.append(success)
+        return all(results) if results else True    
