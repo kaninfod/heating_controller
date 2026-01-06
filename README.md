@@ -1,168 +1,343 @@
+# Heating Controller API
 
-docker run -d -p 8321:8321 \
-# Heating Controller API — User Guide
+A REST API for managing multi-zone heating systems with Home Assistant integration. Control your Zigbee thermostats, define heating schedules, and manage different heating modes—all through a simple API or Home Assistant automations.
 
-Easily automate and control your Zigbee TRVZB thermostats and heating zones via a simple REST API. This system integrates with Home Assistant (HA) for real-time monitoring and advanced scheduling, but you interact with it using a modern, documented API.
+## Features
 
----
+- 🏠 **Multi-zone control** - Manage heating independently for each room/area
+- 📅 **Smart scheduling** - Define custom schedules with workday/weekend/holiday variations
+- 🎛️ **Mode switching** - Quick preset modes: default, stay_home, eco, timer, manual, off, ventilation
+- 🏡 **Home Assistant integration** - Automatic area discovery, real-time synchronization, MQTT-based control
+- 🌡️ **TRV support** - Direct control of Zigbee2MQTT radiator thermostats
+- 📊 **REST API** - Full OpenAPI documentation at `/docs`
 
-## What Can You Do With This API?
+## Quick Start
 
-- Set your home's heating mode (e.g. eco, stay-home, off, timer, ventilation)
-- Get the current system mode and status of all zones/thermostats
-- Change which rooms are heated and when, using flexible schedules
-- Integrate with your own apps, automations, or dashboards
+### Prerequisites
 
----
+- Docker and Docker Compose
+- Home Assistant instance with WebSocket access
+- Zigbee2MQTT (to control TRV devices)
+- Climate entities configured in Home Assistant
 
-## Quick Start for API Users
-
-### 1. Deploy the Controller
-
-**Recommended:** Use Docker Compose (see below). The API will be available on port 8321 by default.
-
-### 2. Connect to the API
-
-- OpenAPI docs: [http://localhost:8321/docs](http://localhost:8321/docs)
-- All endpoints are unauthenticated by default (unless you add a proxy or auth layer)
-
-### 3. Set Up Your Heating Zones and Schedules
-
-Edit the config files (see below) to match your home. Restart the container after changes.
-
----
-
-## Example API Usage
-
-### Get Current System Mode
+### 1. Deploy
 
 ```bash
-curl http://localhost:8321/api/modes/current
+git clone https://github.com/kaninfod/heating_controller.git
+cd heating_controller
+
+# Create configuration
+cp .env.example .env
+
+# Edit .env with your values
+nano .env
+
+# Start
+docker-compose up -d
 ```
 
-### Set System Mode (e.g. Eco Mode for When Away)
+The API will be available at `http://localhost:8000`.
 
-```bash
-curl -X POST http://localhost:8321/api/modes/set \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "eco"}'
+### 2. Configure Home Assistant
+
+Create an `input_select` entity for heating modes:
+
+```yaml
+input_select:
+  heating_mode:
+    name: Heating Mode
+    options:
+      - default
+      - stay_home
+      - eco
+      - timer
+      - manual
+      - off
+      - ventilation
+    initial: default
 ```
 
-### Set Stay Home Mode for Specific Areas
+### 3. Map Your Thermostats
 
-```bash
-curl -X POST http://localhost:8321/api/modes/set \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "stay_home", "active_areas": ["bedroom", "kitchen"]}'
-```
+Edit `config/thermostat_mapping.json` to match your setup:
 
-### List Available Modes
-
-```bash
-curl http://localhost:8321/api/modes
-```
-
-### Get Full System Status
-
-```bash
-curl http://localhost:8321/api/modes/status
-```
-
----
-
-## How to Configure Your System
-
-### 1. Home Assistant Connection
-
-Create a `.env` file (see `.env.example`) and set:
-- `HA_WEBSOCKET_URL` (e.g. `ws://homeassistant.local:8123/api/websocket`)
-- `HA_ACCESS_TOKEN` (long-lived token from HA profile)
-
-### 2. Define Your Zones
-
-Edit `config/zones.json` to list each room/zone, thermostats, and sensors. Example:
-```json
-[
-  {
-    "id": "bedroom",
-    "name": "Bedroom",
-    "thermostats": ["climate.bedroom_thermostat"],
-    "temperature_sensors": ["sensor.bedroom_temp"],
-    "humidity_sensors": ["sensor.bedroom_humidity"],
-    "active_schedule": "default",
-    "enabled": true
-  }
-]
-```
-
-### 3. Set Up Schedules
-
-Each file in `config/schedules/` defines a schedule. Use the `week` key (not `weekly_schedule`). Example:
 ```json
 {
-  "id": "default",
-  "name": "Default",
-  "description": "Standard work week schedule",
-  "week": {
-    "monday": "workday",
-    "tuesday": "workday",
-    "wednesday": "workday",
-    "thursday": "workday",
-    "friday": "workday",
-    "saturday": "weekend_day",
-    "sunday": "weekend_day"
-  }
+  "climate.bedroom_thermostat": "bedroom thermostat",
+  "climate.kitchen_thermostat": "kitchen thermostat",
+  "climate.living_room_thermostat": "living room thermostat"
 }
 ```
-Day types (see `config/day_types.json`) define the actual time/temperature strings for each day type.
 
-### 4. Map Thermostats
+The controller automatically discovers areas from Home Assistant.
 
-Edit `config/thermostat_mapping.json` to map logical thermostat IDs to Zigbee2MQTT device names.
+## API Overview
 
----
-
-## Home Assistant Integration (What to Expect)
-
-- The controller updates HA’s input_select to reflect the current mode, but changes in HA do NOT change the controller’s mode.
-- All thermostats, sensors, and input_selects must exist in HA and be mapped in your config files.
-- Schedules are pushed to TRVs via Zigbee2MQTT.
-
----
-
-## Deployment (for API Users)
-
-### Docker Compose (Recommended)
-
-1. Edit `docker-compose.yml` to mount your config and data directories.
-2. Start the service:
-   ```bash
-   docker-compose up -d
-   ```
-3. The API will be available on port 8321.
-
-### Manual Docker
+### Get System Status
 
 ```bash
-docker build -t heating_controller .
-
-  -v $(pwd)/config:/app/config \
-  -v $(pwd)/data:/app/data \
-  heating_controller
+curl http://localhost:8000/api/status
 ```
 
----
+### Change Heating Mode
 
-## Troubleshooting for API Users
+```bash
+curl -X POST http://localhost:8000/api/modes/default
+```
 
-- **Schedule validation errors:** Make sure all schedule files use the `week` key, not `weekly_schedule`.
-- **HA connection issues:** Double-check `.env` and your HA token permissions.
-- **Mode not changing in HA:** Only controller-originated changes sync to HA.
-- **API not responding:** Check container logs and ensure port 8321 is open.
+Available modes:
+- `default` - Normal schedule
+- `stay_home` - Generate optimized schedule for staying home
+- `eco` - Energy-saving mode
+- `timer` - Temporary timer mode
+- `manual` - Manual control without schedule
+- `off` - Turn off heating
+- `ventilation` - Ventilation only
 
----
+### List Areas
+
+```bash
+curl http://localhost:8000/api/areas
+```
+
+### Get Available Schedules
+
+```bash
+curl http://localhost:8000/api/schedules
+```
+
+### View Schedule Details
+
+```bash
+curl http://localhost:8000/api/schedules/default
+```
+
+### Set Temperature Override
+
+```bash
+curl -X POST http://localhost:8000/api/areas/bedroom/temperature \
+  -H "Content-Type: application/json" \
+  -d '{"temperature": 22}'
+```
+
+### Interactive API Documentation
+
+Open [http://localhost:8000/docs](http://localhost:8000/docs) in your browser to explore all endpoints with a UI.
+
+## Configuration
+
+### Environment Variables (`.env`)
+
+```env
+# Home Assistant WebSocket connection
+HA_WEBSOCKET_URL=wss://your-ha-instance/api/websocket
+HA_ACCESS_TOKEN=eyJ0eXA...  # Long-lived access token from HA profile
+
+# Heating mode input_select entity
+MODE_ENTITY=input_select.heating_mode
+
+# Areas to exclude from control (comma-separated)
+# Leave empty to control all discovered areas
+BLACKLISTED_AREAS=
+
+# Logging
+LOG_LEVEL=DEBUG
+SYSLOG_HOST=192.168.1.100
+SYSLOG_PORT=514
+```
+
+### Thermostat Mapping
+
+**File:** `config/thermostat_mapping.json`
+
+Maps Home Assistant climate entities to Zigbee2MQTT device names:
+
+```json
+{
+  "climate.bedroom_thermostat": "bedroom thermostat",
+  "climate.kitchen_thermostat": "kitchen thermostat"
+}
+```
+
+### Schedule Templates
+
+**File:** `config/day_types.json`
+
+Defines temperature curves for different day types:
+
+```json
+{
+  "workday": "09:00/21 12:00/18 17:00/21 22:00/17 23:00/16",
+  "weekend": "09:00/20 12:00/18 17:00/20 22:00/17 23:00/16"
+}
+```
+
+Format: `HH:MM/TEMPERATURE` separated by spaces
+
+### Predefined Schedules
+
+**Directory:** `config/schedules/`
+
+Contains JSON files defining weekly schedules:
+
+```json
+{
+  "monday": "workday",
+  "tuesday": "workday",
+  "wednesday": "workday",
+  "thursday": "workday",
+  "friday": "workday",
+  "saturday": "weekend",
+  "sunday": "weekend"
+}
+```
+
+## Home Assistant Integration
+
+### Automatic Area Discovery
+
+The controller automatically discovers areas from Home Assistant. Each area with climate entities is available for control.
+
+### Mode Synchronization
+
+When you change the heating mode via the API, it updates the `input_select.heating_mode` entity in Home Assistant.
+
+### MQTT Integration
+
+Schedules are published to Zigbee2MQTT via MQTT topics:
+
+```
+zigbee2mqtt/{device_name}/set
+```
+
+The controller handles publishing schedule updates automatically when switching modes.
+
+### Example Automation
+
+Automatically switch to eco mode when no one is home:
+
+```yaml
+automation:
+  - alias: "Heating: Away Mode"
+    trigger:
+      - platform: state
+        entity_id: group.all_people
+        to: "not_home"
+    action:
+      - service: input_select.select_option
+        target:
+          entity_id: input_select.heating_mode
+        data:
+          option: "eco"
+```
+
+## Troubleshooting
+
+### "No areas discovered"
+
+1. Verify Home Assistant connection:
+   - Check `.env` has correct `HA_WEBSOCKET_URL` and `HA_ACCESS_TOKEN`
+   - Ensure access token is a long-lived token from HA profile
+   - Verify network connectivity to Home Assistant
+
+2. Check area configuration:
+   - Navigate to Settings → Areas in Home Assistant
+   - Create areas and assign devices to them
+   - At least one area must have a climate entity
+
+3. View logs:
+   ```bash
+   docker-compose logs app | grep -i area
+   ```
+
+### "Thermostats not updating"
+
+1. Verify thermostat mapping:
+   ```bash
+   cat config/thermostat_mapping.json
+   ```
+   - Climate entity IDs must match Home Assistant exactly
+   - Z2M device names must match Zigbee2MQTT device names
+
+2. Check MQTT connectivity:
+   ```bash
+   docker-compose logs app | grep -i mqtt
+   ```
+   - Zigbee2MQTT must be running and accessible
+
+3. Verify Zigbee pairing:
+   - Device must be paired in Zigbee2MQTT
+   - Device name must be exactly as specified in mapping
+
+### "Wrong schedule after restart"
+
+The controller caches schedules in memory. This is normal. To reset:
+
+```bash
+docker-compose restart app
+```
+
+### "API endpoint returns 503"
+
+1. Check logs:
+   ```bash
+   docker-compose logs app
+   ```
+
+2. Verify Home Assistant is reachable:
+   ```bash
+   curl $HA_WEBSOCKET_URL
+   ```
+
+3. Restart the service:
+   ```bash
+   docker-compose restart app
+   ```
+
+## Advanced Configuration
+
+### Blacklisting Areas
+
+To prevent specific areas from being controlled:
+
+```env
+BLACKLISTED_AREAS=garage,storage,office
+```
+
+The controller will skip these areas during discovery.
+
+### Logging Configuration
+
+Set log level in `.env`:
+
+```env
+LOG_LEVEL=DEBUG   # Verbose logging
+LOG_LEVEL=INFO    # Standard logging
+LOG_LEVEL=WARNING # Errors only
+```
+
+Send logs to syslog server:
+
+```env
+SYSLOG_HOST=192.168.1.100
+SYSLOG_PORT=514
+```
+
+View logs locally:
+
+```bash
+docker-compose logs -f app
+```
 
 ## License
 
-MIT
+[Add license information]
+
+## Contributing
+
+Contributions are welcome. Please open an issue or pull request on GitHub.
+
+## Support
+
+For issues or questions, please open an issue on the GitHub repository.
 

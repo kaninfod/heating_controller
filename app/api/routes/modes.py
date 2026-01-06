@@ -100,10 +100,11 @@ async def set_mode(request: SetModeRequest, mode_manager: ModeManagerDep):
     force = getattr(request, "force", False)
     success = await mode_manager.set_mode(mode, force=force, **kwargs)
 
-
     if not success:
         if not force and mode == mode_manager.get_current_mode():
-            raise HTTPException(status_code=409, detail=f"Mode {mode.value} is already set")
+            raise HTTPException(
+                status_code=409, detail=f"Mode {mode.value} is already set"
+            )
         raise HTTPException(status_code=500, detail=f"Failed to set {mode.value}")
 
     return {

@@ -22,13 +22,12 @@ class HomeAssistantWebSocket:
     - Maintains persistent connection
     - Subscribes to entity state changes
     - Provides methods to control thermostats
-    - Caches current state of all monitored entities
+    - Caches current state of all entities
     """
 
-    def __init__(self, url: str, access_token: str, monitored_entities: List[str]):
+    def __init__(self, url: str, access_token: str):
         self.url = url
         self.access_token = access_token
-        self.monitored_entities = set(monitored_entities)
 
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self.message_id = 1
@@ -127,19 +126,15 @@ class HomeAssistantWebSocket:
 
             updated_count = 0
             for state in states:
+                self._update_entity_state(state)
+                updated_count += 1
                 entity_id = state.get("entity_id")
+                if entity_id.startswith("input_select."):
+                    logger.info(
+                        f"Loaded input_select entity: {entity_id} = {state.get('state')}"
+                    )
 
-                if entity_id in self.monitored_entities:
-                    self._update_entity_state(state)
-                    updated_count += 1
-                    if entity_id.startswith("input_select."):
-                        logger.info(
-                            f"Loaded input_select entity: {entity_id} = {state.get('state')}"
-                        )
-
-            logger.info(
-                f"Fetched initial states for {updated_count}/{len(self.monitored_entities)} entities"
-            )
+            logger.info(f"Fetched initial states for {updated_count} entities")
             logger.debug(
                 f"Input selects after fetch: {list(self.system_state.input_selects.keys())}"
             )
@@ -217,7 +212,7 @@ class HomeAssistantWebSocket:
                 entity_id = event_data.get("entity_id")
                 new_state = event_data.get("new_state")
 
-                if entity_id in self.monitored_entities and new_state:
+                if new_state:
                     self._update_entity_state(new_state)
 
                     # Notify callbacks
@@ -358,7 +353,9 @@ class HomeAssistantWebSocket:
         }
 
         # Add debug log for payload and entity_id
-        logger.debug(f"[call_service] domain={domain}, service={service}, entity_id='{entity_id}', service_data={service_data}")
+        logger.debug(
+            f"[call_service] domain={domain}, service={service}, entity_id='{entity_id}', service_data={service_data}"
+        )
         logger.debug(f"[call_service] Full payload: {payload}")
 
         try:
@@ -396,7 +393,9 @@ class HomeAssistantWebSocket:
 
     async def set_input_select_option(self, entity_id: str, option: str) -> bool:
         """Set input_select option (used for mode persistence)"""
-        logger.debug(f"[set_input_select_option] entity_id='{entity_id}', option='{option}'")
+        logger.debug(
+            f"[set_input_select_option] entity_id='{entity_id}', option='{option}'"
+        )
         return await self.call_service(
             "input_select", "select_option", entity_id, {"option": option}
         )

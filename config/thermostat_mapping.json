@@ -1,32 +1,8 @@
 {
-  "climate.bedroom_thermostat": {
-    "z2m_name": "bedroom thermostat",
-    "friendly_name": "Bedroom",
-    "zone": "bedroom"
-  },
-  "climate.kitchen_thermostat": {
-    "z2m_name": "kitchen thermostat",
-    "friendly_name": "Kitchen",
-    "zone": "kitchen"
-  },
-  "climate.signe_thermostat": {
-    "z2m_name": "signe thermostat",
-    "friendly_name": "Signe",
-    "zone": "signe"
-  },
-  "climate.dining_room_thermostat_left": {
-    "z2m_name": "dining room thermostat (left)",
-    "friendly_name": "Dining Room Left",
-    "zone": "diningroom"
-  },
-  "climate.dining_room_thermostat_right": {
-    "z2m_name": "dining room thermostat (right)",
-    "friendly_name": "Dining Room Right",
-    "zone": "diningroom"
-  },
-  "climate.tv_lounge_thermostat": {
-    "z2m_name": "tv lounge thermostat",
-    "friendly_name": "TV Lounge",
-    "zone": "tv_lounge"
-  }
+  "climate.bedroom_thermostat": "bedroom thermostat",
+  "climate.kitchen_thermostat": "kitchen thermostat",
+  "climate.signe_thermostat": "signe thermostat",
+  "climate.dining_room_thermostat_left": "dining room thermostat (left)",
+  "climate.dining_room_thermostat_right": "dining room thermostat (right)",
+  "climate.tv_lounge_thermostat": "tv lounge thermostat"
 }

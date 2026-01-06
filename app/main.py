@@ -26,10 +26,10 @@ from app.dependencies import services
 def setup_logging():
     """Configure logging with file, console, and syslog handlers"""
     handlers = []
-        
+
     # Determine environment (default to production for safety)
     env = os.getenv("ENVIRONMENT", "production").lower()
-    
+
     if env == "development":
         # Dev:  Full timestamps, detailed format for console debugging
         console_handler = logging.StreamHandler()
@@ -37,7 +37,7 @@ def setup_logging():
             logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         )
         handlers.append(console_handler)
-        
+
     else:
         # Production: Clean format for Docker/syslog (no timestamp, rsyslog adds it)
         console_handler = logging.StreamHandler()
@@ -47,12 +47,11 @@ def setup_logging():
         handlers.append(console_handler)
 
     logging.basicConfig(
-        level=getattr(logging, settings.log_level), 
-        handlers=handlers, 
-        force=True
+        level=getattr(logging, settings.log_level), handlers=handlers, force=True
     )
 
-    logging.getLogger("watchfiles. main").setLevel(logging.WARNING) 
+    logging.getLogger("watchfiles. main").setLevel(logging.WARNING)
+
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -69,7 +68,6 @@ async def lifespan(app: FastAPI):
         "Starting Heating Control System",
         extra={
             "ha_url": settings.ha_websocket_url,
-            "monitored_entities": len(settings.all_monitored_entities),
             "syslog_enabled": f"{settings.syslog_host}:{settings.syslog_port}",
         },
     )
@@ -82,11 +80,12 @@ async def lifespan(app: FastAPI):
         ha_client = HomeAssistantWebSocket(
             url=settings.ha_websocket_url,
             access_token=settings.ha_access_token,
-            monitored_entities=settings.all_monitored_entities,
         )
 
         # Initialize area manager for HA areas
-        area_manager = AreaManager(ha_client)
+        area_manager = AreaManager(
+            ha_client, blacklisted_areas=settings.blacklisted_areas_list
+        )
 
         # Load thermostat mapping for MQTT publishing
         from app.config import config_loader

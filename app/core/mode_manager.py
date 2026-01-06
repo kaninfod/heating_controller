@@ -575,14 +575,9 @@ class ModeManager:
         import re
 
         # Get thermostat mapping to Z2M device name
-        thermostat_config = self.thermostat_mapping.get(thermostat_id)
-        if not thermostat_config:
-            logger.warning(f"No mapping found for thermostat {thermostat_id}, skipping")
-            return False
-
-        z2m_device_name = thermostat_config.get("z2m_name")
+        z2m_device_name = self.thermostat_mapping.get(thermostat_id)
         if not z2m_device_name:
-            logger.warning(f"No Z2M name configured for {thermostat_id}, skipping")
+            logger.warning(f"No mapping found for thermostat {thermostat_id}, skipping")
             return False
 
         # Validate device name (prevent injection)

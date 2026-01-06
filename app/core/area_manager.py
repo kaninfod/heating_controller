@@ -22,10 +22,13 @@ class AreaManager:
     - Provides aggregated area status
     """
 
-    def __init__(self, ha_client: HomeAssistantWebSocket):
+    def __init__(
+        self, ha_client: HomeAssistantWebSocket, blacklisted_areas: list = None
+    ):
         self.ha_client = ha_client
         self.areas: Dict[str, HAArea] = {}
         self.discovered: bool = False
+        self.blacklisted_areas = set(blacklisted_areas or [])
 
     async def discover_areas(self) -> Dict[str, HAArea]:
         """
@@ -90,6 +93,11 @@ class AreaManager:
             # Create HAArea objects, filtering to only areas with thermostats
             self.areas = {}
             for area_id, entities_by_type in area_entities.items():
+                # Skip blacklisted areas
+                if area_id in self.blacklisted_areas:
+                    logger.debug(f"Skipping area '{area_id}': blacklisted")
+                    continue
+
                 if not entities_by_type["thermostats"]:
                     # Skip areas with no thermostats
                     logger.debug(f"Skipping area '{area_id}': no thermostats")
