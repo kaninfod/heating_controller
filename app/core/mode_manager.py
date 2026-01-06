@@ -1,4 +1,3 @@
-
 """
 Mode Manager Service
 Manages high-level system operating modes and orchestrates changes across all zones
@@ -6,6 +5,7 @@ Manages high-level system operating modes and orchestrates changes across all zo
 
 import logging
 import asyncio
+import copy
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 
@@ -137,7 +137,9 @@ class ModeManager:
         """Get the current system mode"""
         return self.current_mode
 
-    async def set_mode(self, mode: SystemMode, force: bool = False, sync_to_ha: bool = True, **kwargs) -> bool:
+    async def set_mode(
+        self, mode: SystemMode, force: bool = False, sync_to_ha: bool = True, **kwargs
+    ) -> bool:
         """
         Set system mode and apply changes to all thermostats
 
@@ -237,7 +239,6 @@ class ModeManager:
         # Save current mode to restore after ventilation
         self.saved_mode = self.previous_mode
 
-
         # Turn off all thermostats using helper
         results = []
         all_thermostats = set()
@@ -320,20 +321,23 @@ class ModeManager:
             return False
 
         # Generate stay-home week schedule (current day swapped to weekend)
-        base_week = default_schedule.week.model_dump()
+        # Deep copy to ensure we don't mutate the cached schedule object
+        base_week = copy.deepcopy(default_schedule.week.model_dump())
         logger.debug(f"Base week: {base_week}")
 
         stay_home_week = self.schedule_manager.generator.generate_stay_home_schedule(
-            base_week, swap_day=current_day
+            copy.deepcopy(base_week), swap_day=current_day
         )
         logger.debug(f"Stay-home week: {stay_home_week}")
         logger.info(
-            f"Thursday schedule in stay_home_week: {stay_home_week.get('thursday', 'NOT FOUND')}"
+            f"{current_day}'s schedule in stay_home_week: {stay_home_week.get(current_day, 'NOT FOUND')}"
         )
 
         # Generate default week schedule for inactive areas
-        default_week = self.schedule_manager.generator.generate_week_schedule(base_week)
-
+        # Use a fresh deep copy to avoid any cross-contamination
+        default_week = self.schedule_manager.generator.generate_week_schedule(
+            copy.deepcopy(base_week)
+        )
 
         results = []
         for area in self.area_manager.get_all_areas():
@@ -352,7 +356,9 @@ class ModeManager:
 
             # Log the actual schedule for the current day being sent
             current_day_schedule = schedule_data.get(current_day, None)
-            logger.info(f"Schedule for {area.name} on {current_day}: {current_day_schedule}")
+            logger.info(
+                f"Schedule for {area.name} on {current_day}: {current_day_schedule}"
+            )
 
             # Set HVAC mode for all thermostats in area
             hvac_success = await self.set_area_hvac_mode(area, "auto")
@@ -362,7 +368,9 @@ class ModeManager:
 
             # Apply schedule to all thermostats in area using publish_schedule_to_thermostat
             for thermostat_id in area.thermostats:
-                publish_success = await self.publish_schedule_to_thermostat(thermostat_id, schedule_data)
+                publish_success = await self.publish_schedule_to_thermostat(
+                    thermostat_id, schedule_data
+                )
                 results.append(publish_success)
 
         # Schedule auto-restore to default mode at midnight (since stay-home only applies to current day)
@@ -541,8 +549,10 @@ class ModeManager:
             info["timer_remaining_seconds"] = max(0, int(remaining))
 
         return info
-    
-    async def set_thermostat_hvac_mode(self, thermostat_id: str, hvac_mode: str) -> bool:
+
+    async def set_thermostat_hvac_mode(
+        self, thermostat_id: str, hvac_mode: str
+    ) -> bool:
         """
         Set the HVAC mode (off, heat, auto) for a thermostat via Home Assistant.
         Handles logging and error handling.
@@ -554,7 +564,9 @@ class ModeManager:
             logger.error(f"Failed to set {thermostat_id} to {hvac_mode} mode")
         return success
 
-    async def publish_schedule_to_thermostat(self, thermostat_id: str, schedule_data: dict) -> bool:
+    async def publish_schedule_to_thermostat(
+        self, thermostat_id: str, schedule_data: dict
+    ) -> bool:
         """
         Publish a weekly schedule to a thermostat via Home Assistant (MQTT)
         Handles mapping, validation, topic/payload construction, and logging.
@@ -605,7 +617,7 @@ class ModeManager:
             logger.error(f"Failed to publish schedule to {thermostat_id}")
 
         return success
-    
+
     async def set_area_hvac_mode(self, area, hvac_mode: str) -> bool:
         """
         Set the HVAC mode for all thermostats in an area.
@@ -615,4 +627,4 @@ class ModeManager:
         for thermostat_id in area.thermostats:
             success = await self.set_thermostat_hvac_mode(thermostat_id, hvac_mode)
             results.append(success)
-        return all(results) if results else True    
+        return all(results) if results else True

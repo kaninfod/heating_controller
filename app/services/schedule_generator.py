@@ -8,6 +8,7 @@ pairs starting with 00:00.
 from typing import Dict
 import json
 import logging
+import copy
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,8 @@ class ScheduleGenerator:
                 "saturday": "00:00/17 07:00/21 12:00/21 18:00/21 22:00/21 23:00/17"
             }
         """
+        # Deep copy to avoid mutating input data
+        week_composition = copy.deepcopy(week_composition)
         result = {}
         
         for day_name, day_type_id in week_composition.items():
@@ -140,8 +143,8 @@ class ScheduleGenerator:
         
         logger.info(f"Generating stay-home schedule, swapping {swap_day} to weekend_day")
         
-        # Create modified week composition
-        modified_week = base_week.copy()
+        # Create modified week composition - use deep copy to prevent mutation
+        modified_week = copy.deepcopy(base_week)
         modified_week[swap_day] = "weekend_day"
         
         # Generate full schedules
