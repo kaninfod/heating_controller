@@ -36,13 +36,21 @@ nano .env
 docker-compose up -d
 ```
 
-The API will be available at `http://localhost:8000`.
+The API will be available at `http://localhost:8321`.
 
 ### 2. Configure Home Assistant
 
-Create an `input_select` entity for heating modes:
+Add a REST command to call the controller API. In your `configuration.yaml`:
 
 ```yaml
+rest_command:
+  heating_set_mode:
+    url: "http://192.168.68.102:8321/api/modes/set"
+    method: post
+    content_type: "application/json"
+    headers: {"accept": "application/json"}
+    payload: '{"mode": "{{ mode }}", "active_areas": ["{{ rooms }}"], "ventilation_time": {{ ventilation_time }}}'
+
 input_select:
   heating_mode:
     name: Heating Mode
@@ -56,6 +64,8 @@ input_select:
       - ventilation
     initial: default
 ```
+
+This allows you to call the heating controller with fine-grained parameters like specific areas and ventilation duration.
 
 ### 3. Map Your Thermostats
 
@@ -73,16 +83,67 @@ The controller automatically discovers areas from Home Assistant.
 
 ## API Overview
 
+### Set Heating Mode with Parameters
+
+This is the primary way to control heating from Home Assistant:
+
+```bash
+curl -X POST http://localhost:8321/api/modes/set \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mode": "stay_home",
+    "active_areas": ["bedroom", "living_room"],
+    "ventilation_time": 10
+  }'
+```
+
+**Parameters:**
+- `mode` (required): One of `default`, `stay_home`, `eco`, `timer`, `manual`, `off`, `ventilation`
+- `active_areas` (optional): List of specific areas to heat (empty list = all areas)
+- `ventilation_time` (optional): Minutes to run ventilation mode (only for `ventilation` mode)
+
+**Examples:**
+
+Normal heating (all areas):
+```bash
+curl -X POST http://localhost:8321/api/modes/set \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "default", "active_areas": [], "ventilation_time": 0}'
+```
+
+Stay home in bedroom only:
+```bash
+curl -X POST http://localhost:8321/api/modes/set \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "stay_home", "active_areas": ["bedroom"], "ventilation_time": 0}'
+```
+
+Ventilate for 15 minutes:
+```bash
+curl -X POST http://localhost:8321/api/modes/set \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "ventilation", "active_areas": [], "ventilation_time": 15}'
+```
+
+Eco mode (away):
+```bash
+curl -X POST http://localhost:8321/api/modes/set \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "eco", "active_areas": [], "ventilation_time": 0}'
+```
+
 ### Get System Status
 
 ```bash
-curl http://localhost:8000/api/status
+curl http://localhost:8321/api/status
 ```
 
-### Change Heating Mode
+### Change Heating Mode (Simple)
+
+For simple mode changes without parameters:
 
 ```bash
-curl -X POST http://localhost:8000/api/modes/default
+curl -X POST http://localhost:8321/api/modes/default
 ```
 
 Available modes:
@@ -97,32 +158,32 @@ Available modes:
 ### List Areas
 
 ```bash
-curl http://localhost:8000/api/areas
+curl http://localhost:8321/api/areas
 ```
 
 ### Get Available Schedules
 
 ```bash
-curl http://localhost:8000/api/schedules
+curl http://localhost:8321/api/schedules
 ```
 
 ### View Schedule Details
 
 ```bash
-curl http://localhost:8000/api/schedules/default
+curl http://localhost:8321/api/schedules/default
 ```
 
 ### Set Temperature Override
 
 ```bash
-curl -X POST http://localhost:8000/api/areas/bedroom/temperature \
+curl -X POST http://localhost:8321/api/areas/bedroom/temperature \
   -H "Content-Type: application/json" \
   -d '{"temperature": 22}'
 ```
 
 ### Interactive API Documentation
 
-Open [http://localhost:8000/docs](http://localhost:8000/docs) in your browser to explore all endpoints with a UI.
+Open [http://localhost:8321/docs](http://localhost:8321/docs) in your browser to explore all endpoints with a UI.
 
 ## Configuration
 
@@ -194,13 +255,93 @@ Contains JSON files defining weekly schedules:
 
 ## Home Assistant Integration
 
+### REST Command Control
+
+The recommended way to control the heating from Home Assistant is via the REST command defined in `configuration.yaml`:
+
+```yaml
+rest_command:
+  heating_set_mode:
+    url: "http://192.168.68.102:8321/api/modes/set"
+    method: post
+    content_type: "application/json"
+    headers: {"accept": "application/json"}
+    payload: '{"mode": "{{ mode }}", "active_areas": ["{{ rooms }}"], "ventilation_time": {{ ventilation_time }}}'
+```
+
+This allows automations to call the heating controller with specific parameters.
+
 ### Automatic Area Discovery
 
-The controller automatically discovers areas from Home Assistant. Each area with climate entities is available for control.
+The controller automatically discovers areas from Home Assistant. Each area with climate entities is available for control via the `active_areas` parameter.
+
+### Example Automations
+
+**Switch to eco mode when everyone leaves:**
+
+```yaml
+automation:
+  - alias: "Heating: Away Mode"
+    trigger:
+      platform: state
+      entity_id: group.all_people
+      to: "not_home"
+    action:
+      - service: rest_command.heating_set_mode
+        data:
+          mode: eco
+          rooms: ""
+          ventilation_time: 0
+```
+
+**Stay home mode with specific bedroom:**
+
+```yaml
+automation:
+  - alias: "Heating: Stay Home - Bedroom"
+    trigger:
+      platform: state
+      entity_id: input_select.heating_mode_detail
+      to: "Stay home (Bedroom)"
+    action:
+      - service: rest_command.heating_set_mode
+        data:
+          mode: stay_home
+          rooms: "bedroom"
+          ventilation_time: 0
+```
+
+**Ventilate for 10 minutes:**
+
+```yaml
+automation:
+  - alias: "Heating: Ventilate"
+    trigger:
+      platform: state
+      entity_id: input_select.heating_mode_detail
+      to: "Ventilate"
+    action:
+      - variables:
+          vent_time: 10
+      - service: rest_command.heating_set_mode
+        data:
+          mode: ventilation
+          rooms: ""
+          ventilation_time: "{{ vent_time }}"
+      - if:
+          - condition: template
+            value_template: "{{ response['status'] == 200 }}"
+        then:
+          - service: timer.start
+            target:
+              entity_id: timer.ventilation_timer
+            data:
+              duration: "00:{{ '{:02d}'.format(vent_time | int) }}:00"
+```
 
 ### Mode Synchronization
 
-When you change the heating mode via the API, it updates the `input_select.heating_mode` entity in Home Assistant.
+When you change the heating mode via the API, it updates the `input_select.heating_mode` entity in Home Assistant for synchronization with other automations or dashboards.
 
 ### MQTT Integration
 
@@ -211,25 +352,6 @@ zigbee2mqtt/{device_name}/set
 ```
 
 The controller handles publishing schedule updates automatically when switching modes.
-
-### Example Automation
-
-Automatically switch to eco mode when no one is home:
-
-```yaml
-automation:
-  - alias: "Heating: Away Mode"
-    trigger:
-      - platform: state
-        entity_id: group.all_people
-        to: "not_home"
-    action:
-      - service: input_select.select_option
-        target:
-          entity_id: input_select.heating_mode
-        data:
-          option: "eco"
-```
 
 ## Troubleshooting
 
