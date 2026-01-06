@@ -8,7 +8,7 @@ Easily automate and control your Zigbee TRVZB thermostats and heating zones via 
 
 ## What Can You Do With This API?
 
-- Set your home’s heating mode (e.g. holiday, stay-home, off, timer, ventilation)
+- Set your home's heating mode (e.g. eco, stay-home, off, timer, ventilation)
 - Get the current system mode and status of all zones/thermostats
 - Change which rooms are heated and when, using flexible schedules
 - Integrate with your own apps, automations, or dashboards
@@ -40,12 +40,12 @@ Edit the config files (see below) to match your home. Restart the container afte
 curl http://localhost:8321/api/modes/current
 ```
 
-### Set System Mode (e.g. Holiday)
+### Set System Mode (e.g. Eco Mode for When Away)
 
 ```bash
 curl -X POST http://localhost:8321/api/modes/set \
   -H "Content-Type: application/json" \
-  -d '{"mode": "holiday"}'
+  -d '{"mode": "eco"}'
 ```
 
 ### Set Stay Home Mode for Specific Areas

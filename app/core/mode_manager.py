@@ -19,7 +19,7 @@ class ModeManager:
     Manages system-wide heating modes
     - Default: Normal operation, areas follow their assigned schedules
     - Stay Home: Swap current day to weekend pattern, support active areas
-    - Holiday: Apply eco schedule to all areas
+    - Eco: Apply energy-saving schedule to all areas
     - Timer: Turn off now, restore to default at specified time
     - Manual: No supervision, thermostats operate independently
     - Off: All thermostats turned off
@@ -165,8 +165,8 @@ class ModeManager:
         elif mode == SystemMode.STAY_HOME:
             active_areas = kwargs.get("active_areas")
             success = await self._apply_stay_home_mode(active_areas=active_areas)
-        elif mode == SystemMode.HOLIDAY:
-            success = await self._apply_holiday_mode()
+        elif mode == SystemMode.ECO:
+            success = await self._apply_eco_mode()
         elif mode == SystemMode.TIMER:
             restore_time = kwargs.get("restore_time")
             if not restore_time:
@@ -380,11 +380,11 @@ class ModeManager:
 
         return all(results) if results else True
 
-    async def _apply_holiday_mode(self) -> bool:
+    async def _apply_eco_mode(self) -> bool:
         """
-        Holiday mode: Set HVAC to 'auto' and apply eco schedule to all areas
+        Eco mode: Set HVAC to 'auto' and apply eco schedule to all areas
         """
-        logger.info("Applying holiday mode - eco schedule for all areas")
+        logger.info("Applying eco mode - eco schedule for all areas")
 
         # Check if eco schedule exists
         if not self.schedule_manager.get_schedule("eco"):

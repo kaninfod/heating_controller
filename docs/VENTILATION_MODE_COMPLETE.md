@@ -62,7 +62,7 @@ curl -X POST http://localhost:8000/api/modes/set \
 1. **Activation**: System saves current mode and turns all thermostats OFF
 2. **Duration**: Thermostats remain OFF for specified minutes (default 5)
 3. **Restoration**: After duration expires, thermostats turn AUTO and previous mode is restored
-4. **Smart Restore**: If in STAY_HOME → returns to STAY_HOME; if in HOLIDAY → returns to HOLIDAY; etc.
+4. **Smart Restore**: If in STAY_HOME → returns to STAY_HOME; if in ECO → returns to ECO; etc.
 
 ---
 
@@ -196,7 +196,7 @@ response = await mode_manager.set_mode(
 |------|---------|----------|--------------|
 | **default** | Normal operation | Follows schedule | N/A |
 | **stay_home** | Current day weekend | Swap current day to weekend | Midnight ✓ |
-| **holiday** | Energy saving | Eco schedule all day | No |
+| **eco** | Energy saving | Eco schedule all day | No |
 | **timer** | Temporary off | OFF until time | At specified time ✓ |
 | **ventilation** | House ventilation | OFF then restore prev mode | After X minutes ✓ |
 | **manual** | Independent control | Heat mode only | No |

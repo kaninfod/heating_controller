@@ -41,8 +41,8 @@ async def get_available_modes():
                 "description": "Dynamic schedule - swaps current day to weekend pattern, supports active areas",
             },
             {
-                "id": "holiday",
-                "name": "Holiday/Away",
+                "id": "eco",
+                "name": "Eco/Away",
                 "description": "Energy saving - all areas use eco schedule",
             },
             {
@@ -74,7 +74,7 @@ async def set_mode(request: SetModeRequest, mode_manager: ModeManagerDep):
 
     - **default**: Normal work week schedule
     - **stay_home**: Swap current day to weekend pattern, optional active_areas
-    - **holiday**: Apply eco schedule to all areas
+    - **eco**: Apply eco schedule to all areas (energy saving mode for when away)
     - **ventilation**: Turn off thermostats for house ventilation, restore after ventilation_time (1-60 min, default 5)
     - **manual**: No supervision
     - **off**: All thermostats turned off

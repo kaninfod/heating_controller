@@ -196,7 +196,7 @@ async def apply_schedule(
 
 
 @router.get("/{schedule_id}/validate")
-async def validate_schedule(schedule_id: str):
+async def validate_schedule(schedule_id: str, schedule_manager: ScheduleManagerDep):
     """Validate a schedule format"""
 
     schedule = schedule_manager.get_schedule(schedule_id)

@@ -137,7 +137,7 @@ class SystemMode(str, Enum):
     STAY_HOME = (
         "stay_home"  # Dynamic: swap current day to weekend, support active zones
     )
-    HOLIDAY = "holiday"  # Apply eco schedule to all zones
+    ECO = "eco"  # Energy-saving mode - apply eco schedule to all zones
     TIMER = "timer"  # Temporary override with auto-restore
     MANUAL = "manual"  # No automatic control
     OFF = "off"  # All thermostats turned off
