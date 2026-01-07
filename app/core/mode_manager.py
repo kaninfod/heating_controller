@@ -574,10 +574,16 @@ class ModeManager:
         import json
         import re
 
-        # Get thermostat mapping to Z2M device name
+        # Get thermostat mapping to Z2M device name (simplified string format)
         z2m_device_name = self.thermostat_mapping.get(thermostat_id)
         if not z2m_device_name:
             logger.warning(f"No mapping found for thermostat {thermostat_id}, skipping")
+            return False
+
+        if not isinstance(z2m_device_name, str):
+            logger.error(
+                f"Invalid thermostat mapping format for {thermostat_id}: expected string, got {type(z2m_device_name)}"
+            )
             return False
 
         # Validate device name (prevent injection)

@@ -125,15 +125,16 @@ class ScheduleManager:
             # WebSocket calls are fire-and-forget, so we wait for state update
             await asyncio.sleep(0.5)
 
-            # Get Z2M device name from mapping
-            thermostat_config = self.thermostat_mapping.get(thermostat_id)
-            if not thermostat_config:
+            # Get Z2M device name from mapping (simplified string format)
+            z2m_device_name = self.thermostat_mapping.get(thermostat_id)
+            if not z2m_device_name:
                 logger.error(f"No mapping found for thermostat: {thermostat_id}")
                 return False
 
-            z2m_device_name = thermostat_config.get("z2m_name")
-            if not z2m_device_name:
-                logger.error(f"No Z2M name configured for: {thermostat_id}")
+            if not isinstance(z2m_device_name, str):
+                logger.error(
+                    f"Invalid thermostat mapping format for {thermostat_id}: expected string"
+                )
                 return False
 
             # Validate device name (prevent injection)
