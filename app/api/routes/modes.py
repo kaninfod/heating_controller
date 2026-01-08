@@ -85,11 +85,13 @@ async def set_mode(request: SetModeRequest, mode_manager: ModeManagerDep):
 
     kwargs = {}
     if mode == SystemMode.STAY_HOME:
-        # Treat empty list as None (all areas active)
-        if request.active_areas is not None and len(request.active_areas) == 0:
-            kwargs["active_areas"] = None
+        # Treat empty list or list with only empty strings as None (all areas active)
+        if request.active_areas is not None:
+            # Filter out empty strings
+            cleaned_areas = [a for a in request.active_areas if a and a.strip()]
+            kwargs["active_areas"] = cleaned_areas if cleaned_areas else None
         else:
-            kwargs["active_areas"] = request.active_areas
+            kwargs["active_areas"] = None
     if mode == SystemMode.VENTILATION:
         # Only use ventilation_time if provided and > 0, else use default 5
         if request.ventilation_time and request.ventilation_time > 0:
