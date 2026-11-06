@@ -158,9 +158,16 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
         self._last_external_temperature: dict[str, float] = {}
         self._warned_sensors: set[str] = set()
 
-        self._default_mode = (
-            config.get(CONF_DEFAULT_MODE) or self._first_pseudo_mode
-        )
+        default_mode = config.get(CONF_DEFAULT_MODE)
+        if default_mode and default_mode not in self._pseudo_modes:
+            _LOGGER.warning(
+                "default_mode '%s' is not a configured heating mode; using '%s'",
+                default_mode,
+                self._first_pseudo_mode,
+            )
+            default_mode = self._first_pseudo_mode
+
+        self._default_mode = default_mode or self._first_pseudo_mode
         self._midnight_reset = bool(config.get(CONF_MIDNIGHT_RESET, False))
 
         self._device_settings = self._build_device_settings()
@@ -328,6 +335,9 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
                 self._attr_current_option, update_previous=False
             )
 
+        if self._area_sensors:
+            await self._async_sync_external_temperatures()
+
     def _is_stay_home_mode(self, option: str) -> bool:
         """Return True when the mode uses a stay_home configuration."""
         mode = self._pseudo_modes.get(option)
@@ -417,6 +427,7 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
         if old_state.state not in _UNAVAILABLE_STATES:
             return
 
+        self._last_external_temperature.clear()
         self._cancel_availability_reapply()
         self._availability_cancel = async_call_later(
             self.hass, _REAPPLY_DELAY_SECONDS, self._async_reapply
