@@ -90,20 +90,38 @@ def validate_pseudo_modes(
                         "area_ids is empty, will apply to unmentioned areas (catch-all)"
                     )
                 else:
-                    # Validate each area_id exists
-                    for area_id in area_ids:
-                        if area_id not in valid_area_ids:
-                            raise ConfigValidationError(
-                                f"Pseudo mode '{pm_name}' configuration {i}: "
-                                f"area_id '{area_id}' is not defined in areas config. "
-                                f"Valid areas: {', '.join(sorted(valid_area_ids))}"
-                            )
+                    # Warn about unknown or duplicate area IDs instead of
+                    # failing setup (warn-only policy).
+                    seen_in_config: set[str] = set()
 
-                        # Check for duplicates within this pseudo_mode
+                    for area_id in area_ids:
+                        if area_id in seen_in_config:
+                            _LOGGER.warning(
+                                "Pseudo mode '%s' configuration %d: duplicate "
+                                "area_id '%s' in the same list",
+                                pm_name,
+                                i,
+                                area_id,
+                            )
+                        seen_in_config.add(area_id)
+
+                        if area_id not in valid_area_ids:
+                            _LOGGER.warning(
+                                "Pseudo mode '%s' configuration %d: area_id '%s' "
+                                "is not defined in areas config. Valid areas: %s",
+                                pm_name,
+                                i,
+                                area_id,
+                                ", ".join(sorted(valid_area_ids)),
+                            )
+                            continue
+
                         if area_id in all_area_ids_in_mode:
-                            raise ConfigValidationError(
-                                f"Pseudo mode '{pm_name}': "
-                                f"area_id '{area_id}' appears in multiple configurations"
+                            _LOGGER.warning(
+                                "Pseudo mode '%s': area_id '%s' appears in "
+                                "multiple configurations",
+                                pm_name,
+                                area_id,
                             )
 
                     all_area_ids_in_mode.extend(area_ids)
@@ -127,10 +145,12 @@ def validate_pseudo_modes(
 
             for area_id in area_ids:
                 if area_id not in valid_area_ids:
-                    raise ConfigValidationError(
-                        f"Pseudo mode '{pm_name}': "
-                        f"area_id '{area_id}' is not defined in areas config. "
-                        f"Valid areas: {', '.join(sorted(valid_area_ids))}"
+                    _LOGGER.warning(
+                        "Pseudo mode '%s': area_id '%s' is not defined in areas "
+                        "config. Valid areas: %s",
+                        pm_name,
+                        area_id,
+                        ", ".join(sorted(valid_area_ids)),
                     )
         else:
             raise ConfigValidationError(

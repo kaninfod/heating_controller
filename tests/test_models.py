@@ -6,8 +6,6 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import pytest
-
 _MODELS_PATH = (
     Path(__file__).resolve().parents[1]
     / "custom_components"
@@ -66,7 +64,7 @@ class TestWeeklySchedule:
     def test_to_dict_all_days_present(self) -> None:
         """Test that all 7 days are represented in flattened output."""
         schedule_data = {
-            day: f"00:00/18 06:00/20 22:00/18"
+            day: "00:00/18 06:00/20 22:00/18"
             for day in [
                 "monday",
                 "tuesday",
@@ -139,8 +137,8 @@ class TestWeeklySchedule:
         assert "weekly_schedule_monday" in result
         assert result["weekly_schedule_monday"] == "00:00/18.5 06:30/20"
 
-    def test_to_dict_case_sensitivity(self) -> None:
-        """Test that day names maintain their case in the flattened keys."""
+    def test_to_dict_normalizes_day_case(self) -> None:
+        """Test that day names are lowercased in the flattened keys."""
         schedule_data = {
             "Monday": "00:00/18.5",  # Note: capital M
             "friday": "06:30/20",  # Note: lowercase f
@@ -150,10 +148,10 @@ class TestWeeklySchedule:
         # Act
         result = weekly_schedule.to_dict()
 
-        # Assert: Keys preserve the original case (format is weekly_schedule_{original_day_name})
-        assert "weekly_schedule_Monday" in result
+        # Assert: Keys are normalized to lowercase for Z2M
+        assert "weekly_schedule_monday" in result
         assert "weekly_schedule_friday" in result
-        assert result["weekly_schedule_Monday"] == "00:00/18.5"
+        assert result["weekly_schedule_monday"] == "00:00/18.5"
         assert result["weekly_schedule_friday"] == "06:30/20"
 
 
@@ -181,13 +179,11 @@ class TestWeeklyScheduleIntegration:
         # Act: Simulate MQTT payload construction
         mqtt_payload = {
             "system_mode": "heat",
-            "valve_opening_degree": 50,
         }
         mqtt_payload.update(weekly_schedule.to_dict())
 
         # Assert: Payload has correct structure
         assert mqtt_payload["system_mode"] == "heat"
-        assert mqtt_payload["valve_opening_degree"] == 50
 
         # Assert: All weekly schedule keys are present at top level
         assert "weekly_schedule_monday" in mqtt_payload
@@ -198,7 +194,7 @@ class TestWeeklyScheduleIntegration:
             mqtt_payload.get("weekly_schedule"), str
         )
 
-        # Assert: Total payload keys (2 system keys + 7 schedule keys)
+        # Assert: Total payload keys (1 system key + 7 schedule keys)
         assert (
             len([k for k in mqtt_payload.keys() if k.startswith("weekly_schedule_")])
             == 7

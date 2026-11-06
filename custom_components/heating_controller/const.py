@@ -18,9 +18,9 @@ CONF_DAY_TYPES = "day_types"
 CONF_SCHEDULES = "schedules"
 CONF_HEATING_MODES = "heating_modes"
 CONF_VALVE_OPENING_DEGREE = "valve_opening_degree"
-
-# Default values
-DEFAULT_VALVE_OPENING_DEGREE = 50
+CONF_VALVE_CLOSING_DEGREE = "valve_closing_degree"
+CONF_TEMPERATURE_ACCURACY = "temperature_accuracy"
+CONF_SMART_TEMPERATURE_CONTROL = "smart_temperature_control"
 
 # Area configuration keys
 CONF_AREA_NAME = "name"

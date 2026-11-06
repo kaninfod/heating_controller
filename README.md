@@ -61,6 +61,7 @@ A complete example is in [`examples/configuration.yaml`](examples/configuration.
 ```yaml
 heating_controller:
   mqtt_topic_base: "zigbee2mqtt"
+  smart_temperature_control: true
 
   areas:
     - name: Bedroom
@@ -134,6 +135,19 @@ Each area has a display `name`, a stable `id` (used by `area_ids`), and one or m
 - `climate_entity` — the Home Assistant climate entity.
 - `mqtt_name` — the Zigbee2MQTT device name, used in the MQTT topic.
 
+### Optional device settings
+
+These settings are written to the TRV only when `smart_temperature_control` is explicitly `false`:
+
+| Key | Range | Notes |
+|---|---|---|
+| `smart_temperature_control` | `true` / `false` | When `true` (or omitted), valve opening/closing and temperature accuracy are not sent. |
+| `valve_opening_degree` | 0–100 | Requires firmware 1.1.4+. |
+| `valve_closing_degree` | 0–100 | Requires firmware 1.1.4+. |
+| `temperature_accuracy` | -1.0 to -0.2 | Requires firmware 1.3.0+. |
+
+If smart temperature control is ON, Zigbee2MQTT makes valve opening and temperature accuracy unavailable. The integration skips them and logs a warning if they are configured. Set `smart_temperature_control: false` only if you have turned smart control off on the TRVs and want to use valve/accuracy instead.
+
 ### `day_types`
 
 A named temperature curve. The format is:
@@ -142,7 +156,7 @@ A named temperature curve. The format is:
 HH:MM/TEMP HH:MM/TEMP HH:MM/TEMP HH:MM/TEMP HH:MM/TEMP HH:MM/TEMP
 ```
 
-Exactly **6** components are required, and the first must be `00:00/...`.
+Each day type has **1–6** components. The first must be `00:00/...`, times must be ascending, and temperatures must be 4–35 °C in 0.5 °C steps. Integers and `.5` values are both valid.
 
 ### `schedules`
 
@@ -260,12 +274,18 @@ Payload for a scheduled mode:
 }
 ```
 
-For `manual` and `heating_off`, only `system_mode` is sent.
+For `manual` and `heating_off`, no weekly schedule is sent; optional device settings may still be included.
+
+## Compatibility
+
+- **Zigbee2MQTT 2.7.x or newer** for the individual `weekly_schedule_<day>` properties. Tested with 2.14.3.
+- **TRVZB firmware 1.1.4+** for valve opening/closing, **1.3.0+** for temperature accuracy, **1.4.4+** for smart temperature control.
+- The weekly schedule properties are write-only in Z2M; the integration does not read them back.
 
 ## Known limitations
 
-- **Ventilation is not implemented.** `ventilation_time_minutes` is parsed but unused, `parent_mode: ventilation` is not a valid hard mode, and no `ventilate_for_duration` service is registered.
-- **`valve_opening_degree` is parsed but not published.** The payload line in `mqtt_handler.py` is currently commented out.
+- **Ventilation is not implemented in the integration.** `parent_mode: ventilation` is not a valid hard mode and no ventilation service is registered. A separate automation owns the timed off/restore behaviour.
+- **Valve and accuracy are gated by smart control.** They are only sent when `smart_temperature_control: false`; with smart control on, the TRV makes them unavailable.
 - **`default_mode` is not read.** It is accepted as extra config but has no effect.
 - **`stay_home` is a today-only override.** It does not persist across weekdays.
 - **YAML only.** There is no config flow; `config_flow` is `false`.

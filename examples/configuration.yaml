@@ -4,9 +4,13 @@
 heating_controller:
   mqtt_topic_base: "zigbee2mqtt"
 
-  # Parsed by the integration but NOT yet published to the thermostats.
-  # See "Known limitations" in README.md before relying on it.
+  # Keep PID smart control on the TRVs. Valve/accuracy are then not sent.
+  smart_temperature_control: true
+
+  # Only used when smart_temperature_control is false.
   # valve_opening_degree: 15
+  # valve_closing_degree: 100
+  # temperature_accuracy: -0.6
 
   areas:
     - name: Bedroom

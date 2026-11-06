@@ -78,6 +78,6 @@ class WeeklySchedule:
             Example: {"weekly_schedule_monday": "00:00/18.5 06:30/20 ...", ...}
         """
         return {
-            f"weekly_schedule_{day}": schedule
+            f"weekly_schedule_{str(day).lower()}": schedule
             for day, schedule in self.weekly_schedule.items()
         }

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any
 
-from .models import Schedule, WeeklySchedule
+from homeassistant.util import dt as dt_util
+
+from .models import WeeklySchedule
+from .validation import weekday_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,17 +52,21 @@ class ScheduleManager:
             raise ValueError(f"Mode '{mode}' not found in schedules")
 
         schedule_template = self.schedules[mode]
-        today = datetime.now().strftime("%A").lower()
+        today = weekday_name(dt_util.now())
 
         weekly = {}
 
         for day_name, day_type_name in schedule_template.items():
+            day_key = day_name.lower()
+
             # If today and override_today_with is provided, use the override
-            if day_name.lower() == today and override_today_with:
+            if day_key == today and override_today_with:
                 resolved_day_type = override_today_with
                 _LOGGER.debug(
-                    f"Using override for {day_name}: {override_today_with} "
-                    f"(instead of {day_type_name})"
+                    "Using override for %s: %s (instead of %s)",
+                    day_name,
+                    override_today_with,
+                    day_type_name,
                 )
             else:
                 resolved_day_type = day_type_name
@@ -70,7 +76,7 @@ class ScheduleManager:
                     f"Day type '{resolved_day_type}' not found in day_types"
                 )
 
-            weekly[day_name] = self.day_types[resolved_day_type]
+            weekly[day_key] = self.day_types[resolved_day_type]
 
         return WeeklySchedule(weekly_schedule=weekly)
 
@@ -87,7 +93,7 @@ class ScheduleManager:
         """
         mqtt_devices = []
 
-        if not active_area_ids:
+        if active_area_ids is None:
             # All areas active - flatten all thermostats
             for area in self.areas.values():
                 for thermostat in area.get("thermostats", []):

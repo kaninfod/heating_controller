@@ -1,22 +1,64 @@
-"""Select entity for Heating Controller."""
+"""Select entities for Heating Controller."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN, HARD_MODES
+from .const import (
+    CONF_SMART_TEMPERATURE_CONTROL,
+    CONF_TEMPERATURE_ACCURACY,
+    CONF_VALVE_CLOSING_DEGREE,
+    CONF_VALVE_OPENING_DEGREE,
+    DOMAIN,
+)
 from .models import ModeConfiguration, PseudoMode
 from .mqtt_handler import ThermostatController
+from .payloads import build_device_settings
 from .schedule_manager import ScheduleManager
+from .validation import resolve_effective_area_ids
 
 _LOGGER = logging.getLogger(__name__)
+
+_UNAVAILABLE_STATES = {"unavailable", "unknown"}
+_REAPPLY_DELAY_SECONDS = 5
+
+
+def _build_pseudo_modes(configs: list[dict[str, Any]]) -> dict[str, PseudoMode]:
+    """Build PseudoMode objects from the YAML configuration."""
+    pseudo_modes: dict[str, PseudoMode] = {}
+
+    for config in configs:
+        name = config["name"]
+
+        if "configurations" in config:
+            configurations = [
+                ModeConfiguration(
+                    parent_mode=item["parent_mode"],
+                    area_ids=item.get("area_ids", []),
+                )
+                for item in config["configurations"]
+            ]
+        else:
+            configurations = [
+                ModeConfiguration(
+                    parent_mode=config["parent_mode"],
+                    area_ids=config.get("area_ids", []),
+                )
+            ]
+
+        pseudo_modes[name] = PseudoMode(name=name, configurations=configurations)
+
+    return pseudo_modes
 
 
 async def async_setup_platform(
@@ -26,24 +68,18 @@ async def async_setup_platform(
     discovery_info: dict[str, Any] | None = None,
 ) -> None:
     """Set up Heating Controller select entities from YAML."""
-    if DOMAIN not in hass.data:
-        _LOGGER.warning("Heating Controller config not found in hass.data")
-        return
-
-    heating_config = hass.data[DOMAIN].get("config")
+    heating_config = hass.data.get(DOMAIN, {}).get("config")
     if not heating_config:
         _LOGGER.warning("Heating Controller config not found in hass.data")
         return
 
-    _LOGGER.info("Creating heating mode select entities")
+    _LOGGER.debug("Creating heating mode select entities")
     main_entity = HeatingModeSelect(hass, heating_config)
     previous_entity = PreviousHeatingModeSelect(hass, heating_config)
 
-    # Store reference to previous entity so main can update it
     hass.data[DOMAIN]["previous_mode_entity"] = previous_entity
 
     async_add_entities([main_entity, previous_entity], update_before_add=False)
-    _LOGGER.info("Heating mode select entities created successfully")
 
 
 async def async_setup_entry(
@@ -51,18 +87,13 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Heating Controller select entity."""
-    if DOMAIN not in hass.data:
-        _LOGGER.warning("Heating Controller config not found")
-        return
-
-    config = hass.data[DOMAIN].get("config")
+    """Set up Heating Controller select entity from a config entry."""
+    config = hass.data.get(DOMAIN, {}).get("config")
     if not config:
         _LOGGER.warning("Heating Controller config not found in hass.data")
         return
 
-    entity = HeatingModeSelect(hass, config)
-    async_add_entities([entity], update_before_add=False)
+    async_add_entities([HeatingModeSelect(hass, config)], update_before_add=False)
 
 
 class HeatingModeSelect(SelectEntity, RestoreEntity):
@@ -76,229 +107,300 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
         self.hass = hass
         self._config = config
 
-        # Extract config
-        self._ventilation_time = config.get("ventilation_time_minutes", 10)
         self._mqtt_topic_base = config.get("mqtt_topic_base", "zigbee2mqtt")
-        self._areas: list[dict[str, str]] = config.get("areas", [])
+        self._areas: list[dict[str, Any]] = config.get("areas", [])
         self._day_types: dict[str, str] = config.get("day_types", {})
         self._schedules: dict[str, dict[str, str]] = config.get("schedules", {})
-        self._pseudo_modes_config: list[dict[str, Any]] = config.get(
-            "heating_modes", []
-        )
 
-        # Initialize managers
         self._schedule_manager = ScheduleManager(
             self._areas, self._day_types, self._schedules
         )
         self._thermostat_controller = ThermostatController(
-            hass,
-            self._mqtt_topic_base,
+            hass, self._mqtt_topic_base
         )
 
-        # Build pseudo modes from config
-        self._pseudo_modes: dict[str, PseudoMode] = {}
-        for pm_config in self._pseudo_modes_config:
-            pm_name = pm_config["name"]
+        self._pseudo_modes = _build_pseudo_modes(config.get("heating_modes", []))
+        self._first_pseudo_mode = next(iter(self._pseudo_modes), None)
+        self._options = list(self._pseudo_modes)
 
-            # Support both old format (parent_mode + area_ids) and new (configurations)
-            if "configurations" in pm_config:
-                # New format: multiple configurations
-                configurations = []
-                for config_item in pm_config["configurations"]:
-                    configurations.append(
-                        ModeConfiguration(
-                            parent_mode=config_item["parent_mode"],
-                            area_ids=config_item.get("area_ids", []),
-                        )
-                    )
-            else:
-                # Old format: single parent_mode + area_ids
-                configurations = [
-                    ModeConfiguration(
-                        parent_mode=pm_config["parent_mode"],
-                        area_ids=pm_config.get("area_ids", []),
-                    )
-                ]
+        self._mqtt_to_climate = {
+            thermostat["mqtt_name"]: thermostat["climate_entity"]
+            for area in self._areas
+            for thermostat in area.get("thermostats", [])
+        }
 
-            self._pseudo_modes[pm_name] = PseudoMode(
-                name=pm_name,
-                configurations=configurations,
-            )
-
-        # Set current mode to first pseudo mode by default
-        self._current_pseudo_mode: str | None = None
-        self._first_pseudo_mode = next(iter(self._pseudo_modes.keys()), None)
-
-        # Build options list (only pseudo modes - no HARD_MODES)
-        self._options = list(self._pseudo_modes.keys())
+        self._device_settings = self._build_device_settings()
 
         self._attr_unique_id = "heating_mode"
         self._attr_name = "Heating mode"
-        # Don't set current_option here - let async_added_to_hass() restore it
         self._attr_current_option: str | None = None
+        self._attr_options = self._options
+
+        self._apply_lock = asyncio.Lock()
+        self._startup_done = False
+        self._availability_cancel: Any = None
 
     @property
     def options(self) -> list[str]:
-        """Return list of available options."""
+        """Return the available heating modes."""
         return self._options
 
-    async def async_added_to_hass(self) -> None:
-        """Called when the entity is added to Home Assistant.
-
-        Attempts to restore the previous state. If the previous state is no longer
-        available (user removed it from config), falls back to the first option.
-        """
-        await super().async_added_to_hass()
-
-        # Try to restore the last known state
-        last_state = await self.async_get_last_state()
-        if last_state and last_state.state:
-            # Check if the restored state still exists in current options
-            if last_state.state in self._options:
-                self._attr_current_option = last_state.state
-                _LOGGER.info(
-                    f"Restored heating mode to '{last_state.state}' after restart"
-                )
-            else:
-                # Previous mode was removed from config, use first option
-                self._attr_current_option = self._first_pseudo_mode or "default"
-                _LOGGER.warning(
-                    f"Previous heating mode '{last_state.state}' no longer exists in config. "
-                    f"Falling back to '{self._attr_current_option}'"
-                )
-        else:
-            # No previous state to restore, use first option
-            self._attr_current_option = self._first_pseudo_mode or "default"
-            _LOGGER.debug(
-                f"No previous state found. Using default mode '{self._attr_current_option}'"
-            )
-
-        self.async_write_ha_state()
-
-    async def async_select_option(self, option: str) -> None:
-        """Handle option selection for pseudo mode.
-
-        Processes the pseudo mode's configurations and sends appropriate
-        MQTT commands to each group of areas.
-        """
-        _LOGGER.info(f"Heating mode changed to: {option}")
-
-        # Save previous mode
-        if self.hass.data[DOMAIN].get("previous_mode") is None:
-            self.hass.data[DOMAIN]["previous_mode"] = self._attr_current_option
-        else:
-            self.hass.data[DOMAIN]["previous_mode"] = self._attr_current_option
-
-        # Get the pseudo mode
-        pseudo_mode = self._pseudo_modes.get(option)
-        if not pseudo_mode:
-            _LOGGER.error(f"Unknown pseudo mode: {option}")
-            return
-
-        self._current_pseudo_mode = option
-
-        _LOGGER.debug(
-            f"Applying pseudo mode '{option}' with {len(pseudo_mode.configurations)} configuration(s)"
+    def _build_device_settings(self) -> dict[str, Any]:
+        """Build the optional device configuration payload."""
+        settings, ignored = build_device_settings(
+            smart_temperature_control=self._config.get(
+                CONF_SMART_TEMPERATURE_CONTROL
+            ),
+            valve_opening_degree=self._config.get(CONF_VALVE_OPENING_DEGREE),
+            valve_closing_degree=self._config.get(CONF_VALVE_CLOSING_DEGREE),
+            temperature_accuracy=self._config.get(CONF_TEMPERATURE_ACCURACY),
         )
 
-        # Collect all explicitly mentioned area_ids to detect catch-all
-        mentioned_area_ids = set()
-        for config in pseudo_mode.configurations:
-            if config.area_ids:  # Non-empty area_ids
-                mentioned_area_ids.update(config.area_ids)
-
-        # Process each configuration in the pseudo mode
-        for i, config in enumerate(pseudo_mode.configurations):
-            parent_mode = config.parent_mode
-            area_ids = config.area_ids
-
-            # If area_ids is empty and there are mentioned areas, this is a catch-all
-            if not area_ids and mentioned_area_ids:
-                # Get all area IDs and subtract mentioned ones
-                all_area_ids = {area["id"] for area in self._areas}
-                catch_all_area_ids = list(all_area_ids - mentioned_area_ids)
-                _LOGGER.debug(
-                    f"Config {i}: parent_mode='{parent_mode}', catch-all for unmentioned areas: {catch_all_area_ids}"
-                )
-                effective_area_ids = catch_all_area_ids
-            elif not area_ids:
-                # Empty with no mentioned areas = truly all areas
-                _LOGGER.debug(
-                    f"Config {i}: parent_mode='{parent_mode}', area_ids=all (all areas)"
-                )
-                effective_area_ids = None  # None means all areas
-            else:
-                # Explicit area list
-                _LOGGER.debug(
-                    f"Config {i}: parent_mode='{parent_mode}', area_ids={area_ids}"
-                )
-                effective_area_ids = area_ids
-
-            # Determine mode and override
-            if parent_mode == "stay_home":
-                mode = "default"
-                override_day_type = "weekend"
-            else:
-                mode = parent_mode
-                override_day_type = None
-
-            # Get schedule (only for modes that require it)
-            # Hard modes that don't need schedules: manual, heating_off, ventilation
-            modes_without_schedule = {"manual", "heating_off", "ventilation"}
-
-            if parent_mode in modes_without_schedule:
-                weekly_schedule = None
-                _LOGGER.debug(
-                    f"Config {i}: Hard mode '{parent_mode}' does not require a schedule"
-                )
-            else:
-                try:
-                    weekly_schedule = self._schedule_manager.get_weekly_schedule(
-                        mode, override_today_with=override_day_type
-                    )
-                    _LOGGER.info(
-                        f"Generated schedule for config {i} mode '{mode}': {weekly_schedule.to_dict()}"
-                    )
-                except ValueError as e:
-                    _LOGGER.error(f"Failed to get schedule for config {i}: {e}")
-                    return
-
-            # Get active thermostat MQTT devices for this configuration
-            thermostat_ids = self._schedule_manager.get_active_mqtt_devices(
-                effective_area_ids
+        if ignored:
+            _LOGGER.warning(
+                "Ignoring %s because smart_temperature_control is not false",
+                ", ".join(ignored),
             )
 
-            # Determine HVAC mode
-            hvac_mode = self._get_hvac_mode(parent_mode)
+        return settings
 
-            # Publish to thermostats for this configuration
-            # Pass None for schedule if mode doesn't need it
-            # Get global valve_opening_degree from hass.data
-            valve_opening_degree = self.hass.data[DOMAIN].get(
-                "valve_opening_degree", 50
-            )
-            await self._thermostat_controller.set_mode_and_schedule(
-                thermostat_ids,
-                hvac_mode,
-                weekly_schedule,
-                mode=parent_mode,
-                valve_opening_degree=valve_opening_degree,
-            )
+    async def async_added_to_hass(self) -> None:
+        """Restore state and arrange startup/availability reapply."""
+        await super().async_added_to_hass()
 
-        # Update internal state
-        self._attr_current_option = option
+        last_state = await self.async_get_last_state()
+
+        if last_state and last_state.state in self._options:
+            self._attr_current_option = last_state.state
+            _LOGGER.info(
+                "Restored heating mode '%s' after restart", last_state.state
+            )
+        else:
+            self._attr_current_option = self._first_pseudo_mode
+            if last_state and last_state.state:
+                _LOGGER.warning(
+                    "Previous heating mode '%s' no longer exists; using '%s'",
+                    last_state.state,
+                    self._attr_current_option,
+                )
+            else:
+                _LOGGER.debug(
+                    "No previous state; using '%s'", self._attr_current_option
+                )
+
         self.async_write_ha_state()
 
-        # Update previous mode entity
-        previous_entity = self.hass.data[DOMAIN].get("previous_mode_entity")
-        if previous_entity:
-            previous_entity._attr_current_option = self.hass.data[DOMAIN].get(
-                "previous_mode", option
+        climate_entities = list(self._mqtt_to_climate.values())
+        if climate_entities:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, climate_entities, self._handle_availability_change
+                )
             )
-            previous_entity.async_write_ha_state()
+
+        if self.hass.is_running:
+            self.hass.async_create_task(self._async_startup_reapply())
+        else:
+            self.async_on_remove(
+                self.hass.bus.async_listen_once(
+                    EVENT_HOMEASSISTANT_STARTED, self._handle_hass_started
+                )
+            )
+
+        self.async_on_remove(self._cancel_availability_reapply)
+
+    async def _handle_hass_started(self, _event: Any) -> None:
+        """Handle Home Assistant finishing startup."""
+        await self._async_startup_reapply()
+
+    async def _async_startup_reapply(self) -> None:
+        """Publish the restored mode once after startup."""
+        if self._startup_done:
+            return
+
+        self._startup_done = True
+
+        if self._attr_current_option:
+            await self._async_reapply()
+
+    async def _async_reapply(self, _now: Any = None) -> None:
+        """Reapply the current mode, e.g. after a TRV reconnects."""
+        if self._attr_current_option:
+            await self._apply_mode(
+                self._attr_current_option, update_previous=False
+            )
+
+    def _handle_availability_change(self, event: Any) -> None:
+        """Reapply after an unavailable thermostat becomes available."""
+        if not self._startup_done:
+            return
+
+        new_state = event.data.get("new_state")
+        old_state = event.data.get("old_state")
+
+        if new_state is None or new_state.state in _UNAVAILABLE_STATES:
+            return
+
+        if old_state is None:
+            return
+
+        if old_state.state not in _UNAVAILABLE_STATES:
+            return
+
+        self._cancel_availability_reapply()
+        self._availability_cancel = async_call_later(
+            self.hass, _REAPPLY_DELAY_SECONDS, self._async_reapply
+        )
+
+    def _cancel_availability_reapply(self) -> None:
+        """Cancel a pending availability-triggered reapply."""
+        if self._availability_cancel:
+            self._availability_cancel()
+            self._availability_cancel = None
+
+    async def async_select_option(self, option: str) -> None:
+        """Handle a user selection."""
+        _LOGGER.info("Heating mode changed to '%s'", option)
+        await self._apply_mode(option, update_previous=True)
+
+    async def _apply_mode(self, option: str, update_previous: bool) -> bool:
+        """Resolve and publish one heating mode."""
+        async with self._apply_lock:
+            pseudo_mode = self._pseudo_modes.get(option)
+            if not pseudo_mode:
+                _LOGGER.error("Unknown heating mode '%s'", option)
+                return False
+
+            old_option = self._attr_current_option
+            all_area_ids = [area["id"] for area in self._areas]
+            effective_areas = resolve_effective_area_ids(
+                pseudo_mode.configurations, all_area_ids
+            )
+
+            jobs: list[tuple[list[str], str, Any, str]] = []
+
+            for index, (configuration, area_ids) in enumerate(
+                zip(pseudo_mode.configurations, effective_areas)
+            ):
+                if area_ids is not None and not area_ids:
+                    _LOGGER.debug(
+                        "Mode '%s' configuration %d: catch-all has no remaining "
+                        "areas; skipping",
+                        option,
+                        index,
+                    )
+                    continue
+
+                parent_mode = configuration.parent_mode
+
+                if parent_mode == "stay_home":
+                    schedule_mode = "default"
+                    override_day_type = "weekend"
+                else:
+                    schedule_mode = parent_mode
+                    override_day_type = None
+
+                if parent_mode in ("manual", "heating_off", "ventilation"):
+                    weekly_schedule = None
+                else:
+                    try:
+                        weekly_schedule = self._schedule_manager.get_weekly_schedule(
+                            schedule_mode,
+                            override_today_with=override_day_type,
+                        )
+                    except ValueError as err:
+                        _LOGGER.error(
+                            "Failed to build the schedule for mode '%s': %s",
+                            option,
+                            err,
+                        )
+                        return False
+
+                mqtt_names = self._schedule_manager.get_active_mqtt_devices(
+                    area_ids
+                )
+                mqtt_names = self._filter_available(mqtt_names)
+
+                if not mqtt_names:
+                    _LOGGER.warning(
+                        "Mode '%s' configuration %d: no available thermostats; "
+                        "skipping",
+                        option,
+                        index,
+                    )
+                    continue
+
+                jobs.append(
+                    (
+                        mqtt_names,
+                        self._get_hvac_mode(parent_mode),
+                        weekly_schedule,
+                        parent_mode,
+                    )
+                )
+
+            if not jobs:
+                _LOGGER.warning(
+                    "Mode '%s' has no available thermostats; recording the mode "
+                    "without publishing",
+                    option,
+                )
+
+            results: list[bool] = []
+
+            for mqtt_names, hvac_mode, weekly_schedule, parent_mode in jobs:
+                results.append(
+                    await self._thermostat_controller.set_mode_and_schedule(
+                        mqtt_names,
+                        hvac_mode,
+                        weekly_schedule,
+                        mode=parent_mode,
+                        device_settings=self._device_settings,
+                    )
+                )
+
+            if results and not all(results):
+                _LOGGER.error("Failed to apply mode '%s'", option)
+                return False
+
+            self._attr_current_option = option
+            self.async_write_ha_state()
+
+            if update_previous:
+                previous = old_option or option
+                self.hass.data.setdefault(DOMAIN, {})["previous_mode"] = previous
+                previous_entity = self.hass.data[DOMAIN].get(
+                    "previous_mode_entity"
+                )
+                if previous_entity:
+                    previous_entity._attr_current_option = previous
+                    previous_entity.async_write_ha_state()
+
+            return True
+
+    def _filter_available(self, mqtt_names: list[str]) -> list[str]:
+        """Drop thermostats whose climate entity is unavailable."""
+        available: list[str] = []
+
+        for mqtt_name in mqtt_names:
+            entity_id = self._mqtt_to_climate.get(mqtt_name)
+
+            if entity_id:
+                state = self.hass.states.get(entity_id)
+                if state is None or state.state in _UNAVAILABLE_STATES:
+                    _LOGGER.debug(
+                        "Skipping offline thermostat '%s' (%s)",
+                        mqtt_name,
+                        entity_id,
+                    )
+                    continue
+
+            available.append(mqtt_name)
+
+        return available
 
     def _get_hvac_mode(self, mode: str) -> str:
-        """Convert heating mode to HVAC mode."""
+        """Convert a heating mode to an HVAC mode."""
         hvac_map = {
             "default": "auto",
             "stay_home": "auto",
@@ -321,88 +423,40 @@ class PreviousHeatingModeSelect(SelectEntity, RestoreEntity):
         self.hass = hass
         self._config = config
 
-        # Get the same options as HeatingModeSelect (heating modes only)
-        self._pseudo_modes_config: list[dict[str, Any]] = config.get(
-            "heating_modes", []
-        )
-        self._pseudo_modes: dict[str, PseudoMode] = {}
-        for pm_config in self._pseudo_modes_config:
-            pm_name = pm_config["name"]
-
-            # Support both old format (parent_mode + area_ids) and new (configurations)
-            if "configurations" in pm_config:
-                # New format: multiple configurations
-                configurations = []
-                for config_item in pm_config["configurations"]:
-                    configurations.append(
-                        ModeConfiguration(
-                            parent_mode=config_item["parent_mode"],
-                            area_ids=config_item.get("area_ids", []),
-                        )
-                    )
-            else:
-                # Old format: single parent_mode + area_ids
-                configurations = [
-                    ModeConfiguration(
-                        parent_mode=pm_config["parent_mode"],
-                        area_ids=pm_config.get("area_ids", []),
-                    )
-                ]
-
-            self._pseudo_modes[pm_name] = PseudoMode(
-                name=pm_name,
-                configurations=configurations,
-            )
-
-        first_pseudo_mode = next(iter(self._pseudo_modes.keys()), None)
-        self._first_pseudo_mode = first_pseudo_mode
-        self._options = list(self._pseudo_modes.keys())
+        self._pseudo_modes = _build_pseudo_modes(config.get("heating_modes", []))
+        self._first_pseudo_mode = next(iter(self._pseudo_modes), None)
+        self._options = list(self._pseudo_modes)
 
         self._attr_unique_id = "previous_heating_mode"
         self._attr_name = "Previous heating mode"
-        # Don't set current_option here - let async_added_to_hass() restore it
         self._attr_current_option: str | None = None
+        self._attr_options = self._options
 
     @property
     def options(self) -> list[str]:
-        """Return list of available options."""
+        """Return the available heating modes."""
         return self._options
 
     async def async_added_to_hass(self) -> None:
-        """Called when the entity is added to Home Assistant.
-
-        Attempts to restore the previous state. If the previous state is no longer
-        available (user removed it from config), falls back to the first option.
-        """
+        """Restore the previous mode after a restart."""
         await super().async_added_to_hass()
 
-        # Try to restore the last known state
         last_state = await self.async_get_last_state()
-        if last_state and last_state.state:
-            # Check if the restored state still exists in current options
-            if last_state.state in self._options:
-                self._attr_current_option = last_state.state
-                _LOGGER.info(
-                    f"Restored previous heating mode to '{last_state.state}' after restart"
-                )
-            else:
-                # Previous mode was removed from config, use first option
-                self._attr_current_option = self._first_pseudo_mode or "default"
-                _LOGGER.warning(
-                    f"Previous heating mode '{last_state.state}' no longer exists in config. "
-                    f"Falling back to '{self._attr_current_option}'"
-                )
+
+        if last_state and last_state.state in self._options:
+            self._attr_current_option = last_state.state
         else:
-            # No previous state to restore, use first option
-            self._attr_current_option = self._first_pseudo_mode or "default"
-            _LOGGER.debug(
-                f"No previous state found for previous mode. Using '{self._attr_current_option}'"
-            )
+            self._attr_current_option = self._first_pseudo_mode
+            if last_state and last_state.state:
+                _LOGGER.warning(
+                    "Previous heating mode '%s' no longer exists; using '%s'",
+                    last_state.state,
+                    self._attr_current_option,
+                )
 
         self.async_write_ha_state()
 
     async def async_select_option(self, option: str) -> None:
-        """Handle option selection (not typically called, but required by interface)."""
-        _LOGGER.debug(f"Previous mode updated to: {option}")
+        """Handle a manual update of the previous-mode helper."""
         self._attr_current_option = option
         self.async_write_ha_state()
