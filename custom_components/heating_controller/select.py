@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
@@ -11,20 +12,32 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_call_later,
+    async_track_state_change_event,
+    async_track_time_change,
+    async_track_time_interval,
+)
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_DEFAULT_MODE,
+    CONF_MIDNIGHT_RESET,
     CONF_SMART_TEMPERATURE_CONTROL,
     CONF_TEMPERATURE_ACCURACY,
+    CONF_TEMPERATURE_SENSOR,
     CONF_VALVE_CLOSING_DEGREE,
     CONF_VALVE_OPENING_DEGREE,
     DOMAIN,
 )
 from .models import ModeConfiguration, PseudoMode
 from .mqtt_handler import ThermostatController
-from .payloads import build_device_settings
+from .payloads import (
+    build_device_settings,
+    build_device_settings_map,
+    clamp_external_temperature,
+)
 from .schedule_manager import ScheduleManager
 from .validation import disabled_mqtt_names, resolve_effective_area_ids
 
@@ -33,6 +46,7 @@ _LOGGER = logging.getLogger(__name__)
 _UNAVAILABLE_STATES = {"unavailable", "unknown"}
 _REAPPLY_DELAY_SECONDS = 5
 _STARTUP_WAIT_SECONDS = 60
+_EXTERNAL_TEMPERATURE_INTERVAL = timedelta(minutes=5)
 
 
 def _build_pseudo_modes(configs: list[dict[str, Any]]) -> dict[str, PseudoMode]:
@@ -80,6 +94,7 @@ async def async_setup_platform(
     previous_entity = PreviousHeatingModeSelect(hass, heating_config)
 
     hass.data[DOMAIN]["previous_mode_entity"] = previous_entity
+    hass.data[DOMAIN]["mode_entity"] = main_entity
 
     async_add_entities([main_entity, previous_entity], update_before_add=False)
 
@@ -95,7 +110,9 @@ async def async_setup_entry(
         _LOGGER.warning("Heating Controller config not found in hass.data")
         return
 
-    async_add_entities([HeatingModeSelect(hass, config)], update_before_add=False)
+    entity = HeatingModeSelect(hass, config)
+    hass.data[DOMAIN]["mode_entity"] = entity
+    async_add_entities([entity], update_before_add=False)
 
 
 class HeatingModeSelect(SelectEntity, RestoreEntity):
@@ -131,6 +148,20 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
             for thermostat in area.get("thermostats", [])
         }
         self._disabled_mqtt = disabled_mqtt_names(self._areas)
+        self._device_settings_by_mqtt = build_device_settings_map(config)
+
+        self._area_sensors = {
+            area["id"]: area[CONF_TEMPERATURE_SENSOR]
+            for area in self._areas
+            if area.get(CONF_TEMPERATURE_SENSOR)
+        }
+        self._last_external_temperature: dict[str, float] = {}
+        self._warned_sensors: set[str] = set()
+
+        self._default_mode = (
+            config.get(CONF_DEFAULT_MODE) or self._first_pseudo_mode
+        )
+        self._midnight_reset = bool(config.get(CONF_MIDNIGHT_RESET, False))
 
         self._device_settings = self._build_device_settings()
 
@@ -149,6 +180,9 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
         self._last_apply_error: str | None = None
         self._last_published: list[str] = []
         self._last_skipped: list[str] = []
+        self._last_ventilate_time: Any = None
+        self._last_ventilate_published: list[str] = []
+        self._last_ventilate_skipped: list[str] = []
 
     @property
     def options(self) -> list[str]:
@@ -208,6 +242,22 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
                 )
             )
 
+        if self._area_sensors:
+            self.async_on_remove(
+                async_track_time_interval(
+                    self.hass,
+                    self._async_sync_external_temperatures,
+                    _EXTERNAL_TEMPERATURE_INTERVAL,
+                )
+            )
+
+        if self._midnight_reset:
+            self.async_on_remove(
+                async_track_time_change(
+                    self.hass, self._handle_midnight, hour=0, minute=0, second=0
+                )
+            )
+
         if self.hass.is_running:
             self._startup_task = self.hass.async_create_task(
                 self._async_startup_reapply()
@@ -236,6 +286,9 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
 
         if self._attr_current_option:
             await self._async_reapply()
+
+        if self._area_sensors:
+            await self._async_sync_external_temperatures()
 
     async def _async_wait_for_thermostats(self) -> None:
         """Wait until at least one enabled thermostat is available."""
@@ -275,6 +328,78 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
                 self._attr_current_option, update_previous=False
             )
 
+    def _is_stay_home_mode(self, option: str) -> bool:
+        """Return True when the mode uses a stay_home configuration."""
+        mode = self._pseudo_modes.get(option)
+        return bool(
+            mode
+            and any(
+                configuration.parent_mode == "stay_home"
+                for configuration in mode.configurations
+            )
+        )
+
+    async def _handle_midnight(self, _now: Any) -> None:
+        """Reset stay-home modes to the default mode at midnight."""
+        option = self._attr_current_option
+        if not option or not self._is_stay_home_mode(option):
+            return
+
+        if self._default_mode and self._default_mode in self._pseudo_modes:
+            _LOGGER.info(
+                "Midnight reset: '%s' -> '%s'", option, self._default_mode
+            )
+            await self._apply_mode(self._default_mode, update_previous=True)
+
+    async def _async_sync_external_temperatures(self, _now: Any = None) -> None:
+        """Publish area sensor temperatures to the TRVs."""
+        for area_id, sensor_id in self._area_sensors.items():
+            state = self.hass.states.get(sensor_id)
+
+            if state is None or state.state in _UNAVAILABLE_STATES:
+                if sensor_id not in self._warned_sensors:
+                    _LOGGER.warning(
+                        "Temperature sensor '%s' for area '%s' is unavailable",
+                        sensor_id,
+                        area_id,
+                    )
+                    self._warned_sensors.add(sensor_id)
+                continue
+
+            try:
+                value = clamp_external_temperature(float(state.state))
+            except (TypeError, ValueError):
+                if sensor_id not in self._warned_sensors:
+                    _LOGGER.warning(
+                        "Temperature sensor '%s' for area '%s' has a non-numeric "
+                        "state: %s",
+                        sensor_id,
+                        area_id,
+                        state.state,
+                    )
+                    self._warned_sensors.add(sensor_id)
+                continue
+
+            self._warned_sensors.discard(sensor_id)
+
+            mqtt_names = self._schedule_manager.get_active_mqtt_devices([area_id])
+            for mqtt_name in mqtt_names:
+                available, _ = self._filter_available([mqtt_name])
+                if not available:
+                    continue
+
+                if self._last_external_temperature.get(mqtt_name) == value:
+                    continue
+
+                if await self._thermostat_controller.set_external_temperature(
+                    mqtt_name, value
+                ):
+                    self._last_external_temperature[mqtt_name] = value
+                else:
+                    _LOGGER.error(
+                        "Failed to send external temperature to '%s'", mqtt_name
+                    )
+
     def _handle_availability_change(self, event: Any) -> None:
         """Reapply after an unavailable thermostat becomes available."""
         if not self._startup_done:
@@ -308,6 +433,69 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
         _LOGGER.info("Heating mode changed to '%s'", option)
         await self._apply_mode(option, update_previous=True)
 
+    async def async_ventilate(
+        self, duration: int, area_ids: list[str] | None = None
+    ) -> None:
+        """Start a native TRV timer that closes the valve for a duration."""
+        known_areas = {area["id"] for area in self._areas}
+        requested = area_ids or sorted(known_areas)
+        target_areas = []
+
+        for area_id in requested:
+            if area_id in known_areas:
+                target_areas.append(area_id)
+            else:
+                _LOGGER.warning(
+                    "Cannot ventilate unknown area '%s'", area_id
+                )
+
+        published: list[str] = []
+        skipped: list[str] = []
+
+        for area_id in target_areas:
+            mqtt_names = self._schedule_manager.get_active_mqtt_devices([area_id])
+
+            for mqtt_name in mqtt_names:
+                available, filter_skipped = self._filter_available([mqtt_name])
+                skipped.extend(filter_skipped)
+
+                if not available:
+                    continue
+
+                entity_id = self._mqtt_to_climate.get(mqtt_name)
+                state = self.hass.states.get(entity_id) if entity_id else None
+
+                if state is not None and state.state == "off":
+                    _LOGGER.warning(
+                        "Cannot ventilate '%s': system_mode is off", mqtt_name
+                    )
+                    skipped.append(mqtt_name)
+                    continue
+
+                if await self._thermostat_controller.set_temporary_mode(
+                    [mqtt_name],
+                    "timer",
+                    duration,
+                    target_temperature=4.0,
+                ):
+                    published.append(mqtt_name)
+                else:
+                    _LOGGER.error(
+                        "Failed to start ventilation on '%s'", mqtt_name
+                    )
+
+        self._last_ventilate_time = dt_util.now()
+        self._last_ventilate_published = sorted(set(published))
+        self._last_ventilate_skipped = sorted(set(skipped))
+        self.async_write_ha_state()
+
+        _LOGGER.info(
+            "Ventilation started for %s minute(s): published=%s skipped=%s",
+            duration,
+            self._last_ventilate_published,
+            self._last_ventilate_skipped,
+        )
+
     async def _apply_mode(self, option: str, update_previous: bool) -> bool:
         """Resolve and publish one heating mode."""
         async with self._apply_lock:
@@ -324,7 +512,7 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
                 pseudo_mode.configurations, all_area_ids
             )
 
-            jobs: list[tuple[list[str], str, Any, str]] = []
+            jobs: list[tuple[str, str, Any, str]] = []
             skipped_all: list[str] = []
 
             for index, (configuration, area_ids) in enumerate(
@@ -377,14 +565,15 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
                     )
                     continue
 
-                jobs.append(
-                    (
-                        mqtt_names,
-                        self._get_hvac_mode(parent_mode),
-                        weekly_schedule,
-                        parent_mode,
+                for mqtt_name in mqtt_names:
+                    jobs.append(
+                        (
+                            mqtt_name,
+                            self._get_hvac_mode(parent_mode),
+                            weekly_schedule,
+                            parent_mode,
+                        )
                     )
-                )
 
             if not jobs:
                 _LOGGER.warning(
@@ -396,17 +585,21 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
             published_success: list[str] = []
             results: list[bool] = []
 
-            for mqtt_names, hvac_mode, weekly_schedule, parent_mode in jobs:
+            for mqtt_name, hvac_mode, weekly_schedule, parent_mode in jobs:
+                settings = {
+                    **self._device_settings,
+                    **self._device_settings_by_mqtt.get(mqtt_name, {}),
+                }
                 success = await self._thermostat_controller.set_mode_and_schedule(
-                    mqtt_names,
+                    [mqtt_name],
                     hvac_mode,
                     weekly_schedule,
                     mode=parent_mode,
-                    device_settings=self._device_settings,
+                    device_settings=settings,
                 )
                 results.append(success)
                 if success:
-                    published_success.extend(mqtt_names)
+                    published_success.append(mqtt_name)
 
             if results and not all(results):
                 error = f"Failed to apply mode '{option}'"
@@ -459,6 +652,13 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
             "last_apply_error": self._last_apply_error,
             "last_published": self._last_published,
             "last_skipped": self._last_skipped,
+            "last_ventilate_time": (
+                self._last_ventilate_time.isoformat()
+                if self._last_ventilate_time
+                else None
+            ),
+            "last_ventilate_published": self._last_ventilate_published,
+            "last_ventilate_skipped": self._last_ventilate_skipped,
         }
 
     def _record_apply(

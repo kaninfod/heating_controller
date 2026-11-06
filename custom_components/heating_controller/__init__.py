@@ -14,11 +14,15 @@ from homeassistant.helpers.discovery import async_load_platform
 from .const import (
     CONF_AREAS,
     CONF_DAY_TYPES,
+    CONF_DEFAULT_MODE,
+    CONF_DEVICE_SETTINGS,
     CONF_HEATING_MODES,
+    CONF_MIDNIGHT_RESET,
     CONF_MQTT_TOPIC_BASE,
     CONF_SCHEDULES,
     CONF_SMART_TEMPERATURE_CONTROL,
     CONF_TEMPERATURE_ACCURACY,
+    CONF_TEMPERATURE_SENSOR,
     CONF_VALVE_CLOSING_DEGREE,
     CONF_VALVE_OPENING_DEGREE,
     DEFAULT_MQTT_TOPIC_BASE,
@@ -46,6 +50,9 @@ _KNOWN_TOP_LEVEL_KEYS = {
     CONF_VALVE_CLOSING_DEGREE,
     CONF_TEMPERATURE_ACCURACY,
     CONF_SMART_TEMPERATURE_CONTROL,
+    CONF_DEVICE_SETTINGS,
+    CONF_DEFAULT_MODE,
+    CONF_MIDNIGHT_RESET,
     CONF_AREAS,
     CONF_DAY_TYPES,
     CONF_SCHEDULES,
@@ -88,6 +95,19 @@ def _log_config_warnings(heating_config: dict[str, Any]) -> None:
     mode_names = [mode.get("name") for mode in modes if mode.get("name")]
     for mode_name in _duplicates(mode_names):
         _LOGGER.warning("Duplicate heating mode name '%s'", mode_name)
+
+    default_mode = heating_config.get(CONF_DEFAULT_MODE)
+    if default_mode and default_mode not in mode_names:
+        _LOGGER.warning(
+            "default_mode '%s' is not one of the configured heating modes",
+            default_mode,
+        )
+
+    if heating_config.get(CONF_MIDNIGHT_RESET) and not default_mode:
+        _LOGGER.warning(
+            "midnight_reset is enabled without default_mode; the first heating "
+            "mode will be used"
+        )
 
     for mode in modes:
         for config in mode.get("configurations", []) or []:
@@ -141,6 +161,28 @@ def _log_config_warnings(heating_config: dict[str, Any]) -> None:
                 )
 
 
+DEVICE_SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Optional("open_window"): cv.boolean,
+        vol.Optional("frost_protection_temperature"): vol.All(
+            vol.Coerce(float), vol.Range(min=4.0, max=35.0)
+        ),
+        vol.Optional("child_lock"): cv.boolean,
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
+SERVICE_VENTILATE = "ventilate"
+SERVICE_VENTILATE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("duration", default=10): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=240)
+        ),
+        vol.Optional("area_ids", default=[]): [cv.string],
+    }
+)
+
+
 # Configuration schema for configuration.yaml
 CONFIG_SCHEMA = vol.Schema(
     {
@@ -159,16 +201,24 @@ CONFIG_SCHEMA = vol.Schema(
                     vol.Coerce(float), vol.Range(min=-1.0, max=-0.2)
                 ),
                 vol.Optional(CONF_SMART_TEMPERATURE_CONTROL): cv.boolean,
+                vol.Optional(CONF_DEVICE_SETTINGS): DEVICE_SETTINGS_SCHEMA,
+                vol.Optional(CONF_DEFAULT_MODE): cv.string,
+                vol.Optional(CONF_MIDNIGHT_RESET, default=False): cv.boolean,
                 vol.Required(CONF_AREAS): [
                     {
                         vol.Required("name"): cv.string,
                         vol.Required("id"): cv.string,
                         vol.Optional("enabled", default=True): cv.boolean,
+                        vol.Optional(CONF_TEMPERATURE_SENSOR): cv.entity_id,
+                        vol.Optional(CONF_DEVICE_SETTINGS): DEVICE_SETTINGS_SCHEMA,
                         vol.Required("thermostats"): [
                             {
                                 vol.Required("climate_entity"): cv.entity_id,
                                 vol.Required("mqtt_name"): cv.string,
                                 vol.Optional("enabled", default=True): cv.boolean,
+                                vol.Optional(
+                                    CONF_DEVICE_SETTINGS
+                                ): DEVICE_SETTINGS_SCHEMA,
                             }
                         ],
                     }
@@ -236,6 +286,27 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         return False
 
     _LOGGER.info("Heating modes configuration validated successfully")
+
+    if not hass.services.has_service(DOMAIN, SERVICE_VENTILATE):
+
+        async def _handle_ventilate(call: Any) -> None:
+            entity = hass.data.get(DOMAIN, {}).get("mode_entity")
+            if not entity:
+                _LOGGER.error(
+                    "Cannot ventilate: heating mode entity is not ready"
+                )
+                return
+
+            await entity.async_ventilate(
+                call.data["duration"], call.data.get("area_ids", [])
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_VENTILATE,
+            _handle_ventilate,
+            schema=SERVICE_VENTILATE_SCHEMA,
+        )
 
     # Load the select platform
     hass.async_create_task(async_load_platform(hass, "select", DOMAIN, {}, config))

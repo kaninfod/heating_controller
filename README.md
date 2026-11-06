@@ -62,16 +62,25 @@ A complete example is in [`examples/configuration.yaml`](examples/configuration.
 heating_controller:
   mqtt_topic_base: "zigbee2mqtt"
   smart_temperature_control: true
+  default_mode: "Normal mode"
+  midnight_reset: true
+
+  device_settings:
+    frost_protection_temperature: 7
 
   areas:
     - name: Bedroom
       id: bedroom
+      temperature_sensor: sensor.bedroom_temperature
       thermostats:
         - climate_entity: climate.bedroom_thermostat
           mqtt_name: "bedroom thermostat"
 
     - name: Kitchen
       id: kitchen
+      temperature_sensor: sensor.kitchen_temperature
+      device_settings:
+        open_window: true
       thermostats:
         - climate_entity: climate.kitchen_thermostat
           mqtt_name: "kitchen thermostat"
@@ -227,6 +236,7 @@ The main selector restores its last option after a Home Assistant restart and re
 - `offline_thermostats`
 - `last_apply_success`, `last_apply_time`, `last_apply_error`
 - `last_published`, `last_skipped`
+- `last_ventilate_time`, `last_ventilate_published`, `last_ventilate_skipped`
 
 These show exactly which TRVs were published to or skipped by the last mode apply.
 
@@ -259,6 +269,77 @@ target:
 data:
   option: "Stay home (bedroom only)"
 ```
+
+## Native ventilation
+
+Use the service instead of the `Ventilate` select mode when you want the TRV's own timer:
+
+```yaml
+service: heating_controller.ventilate
+data:
+  duration: 10          # minutes, 1–240
+  area_ids: []          # empty = all enabled areas
+```
+
+The integration sends:
+
+```json
+{
+  "temporary_mode_select": "timer",
+  "temporary_mode_duration": 10,
+  "timer_mode_target_temp": 4
+}
+```
+
+The TRV closes the valve for the duration and then restores its previous mode and temperature by itself. The select mode is not changed, and the timer survives HA restarts. The service skips disabled/offline TRVs and refuses TRVs whose `system_mode` is `off`.
+
+## External temperature sensors
+
+Add an optional sensor per area:
+
+```yaml
+areas:
+  - name: Kitchen
+    id: kitchen
+    temperature_sensor: sensor.kitchen_temperature
+    thermostats:
+      - climate_entity: climate.kitchen_thermostat
+        mqtt_name: "kitchen thermostat"
+```
+
+Every 5 minutes, if the value changed by at least 0.1 °C, the integration publishes `external_temperature_input` to every TRV in that area. Unavailable sensors and disabled/offline TRVs are skipped. The TRV must already be set to `remote_temperature` (Z2M's temperature source selector).
+
+Remove any old `external_temperature_input` automations after verifying the integration is publishing the same values, otherwise the values will be written twice.
+
+## Device settings
+
+Independent TRV settings can be set globally, per area, or per thermostat. More specific settings win:
+
+```yaml
+heating_controller:
+  device_settings:
+    frost_protection_temperature: 7
+    open_window: true
+
+  areas:
+    - id: kitchen
+      device_settings:
+        child_lock: true
+```
+
+Supported keys: `open_window`, `frost_protection_temperature`, `child_lock`. They are applied with each mode publish and when a TRV reconnects. Valve and temperature-accuracy settings remain gated by `smart_temperature_control` and are not part of this block.
+
+## Midnight reset
+
+To clear a stay-home mode automatically at midnight:
+
+```yaml
+heating_controller:
+  default_mode: "Normal mode"
+  midnight_reset: true
+```
+
+At 00:00 the integration switches any mode containing a `stay_home` configuration back to `default_mode` (or the first mode if unset). This replaces the midnight reset automation. If HA is down at midnight, the reset runs on the next normal mode application, not retroactively.
 
 ## MQTT payload
 
@@ -299,10 +380,10 @@ For `manual` and `heating_off`, no weekly schedule is sent; optional device sett
 
 ## Known limitations
 
-- **Ventilation is not implemented in the integration.** `parent_mode: ventilation` is not a valid hard mode and no ventilation service is registered. A separate automation owns the timed off/restore behaviour.
+- **`parent_mode: ventilation` is not a valid hard mode.** Use the `heating_controller.ventilate` service or the optional `Ventilate` select mode.
 - **Valve and accuracy are gated by smart control.** They are only sent when `smart_temperature_control: false`; with smart control on, the TRV makes them unavailable.
-- **`default_mode` is not part of the schema.** The integration logs an unknown-key warning if it is present; it has no effect.
-- **`stay_home` is a today-only override.** It does not persist across weekdays.
+- **`stay_home` is a today-only override.** It does not persist across weekdays. Use `midnight_reset` to clear it automatically.
+- **Midnight reset is not retroactive.** If HA is down at midnight, the stay-home mode is reset on the next normal apply, not on startup.
 - **YAML only.** There is no config flow; `config_flow` is `false`.
 - **No per-area permanent schedule.** Areas follow the schedule of the selected mode; there is no per-area schedule assignment.
 

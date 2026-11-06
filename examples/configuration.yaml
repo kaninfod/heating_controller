@@ -7,6 +7,12 @@ heating_controller:
   # Keep PID smart control on the TRVs. Valve/accuracy are then not sent.
   smart_temperature_control: true
 
+  default_mode: "Normal mode"
+  midnight_reset: true
+
+  device_settings:
+    frost_protection_temperature: 7
+
   # Only used when smart_temperature_control is false.
   # valve_opening_degree: 15
   # valve_closing_degree: 100
@@ -16,12 +22,16 @@ heating_controller:
     - name: Bedroom
       id: bedroom
       # enabled: false   # use while the TRV is out of service
+      temperature_sensor: sensor.bedroom_temperature
       thermostats:
         - climate_entity: climate.bedroom_thermostat
           mqtt_name: "bedroom thermostat"
 
     - name: Kitchen
       id: kitchen
+      temperature_sensor: sensor.kitchen_temperature
+      device_settings:
+        open_window: true
       thermostats:
         - climate_entity: climate.kitchen_thermostat
           mqtt_name: "kitchen thermostat"

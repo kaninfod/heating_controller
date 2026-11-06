@@ -21,6 +21,9 @@ _spec.loader.exec_module(_payloads)
 
 build_mqtt_payload = _payloads.build_mqtt_payload
 build_device_settings = _payloads.build_device_settings
+build_temporary_mode_payload = _payloads.build_temporary_mode_payload
+build_device_settings_map = _payloads.build_device_settings_map
+clamp_external_temperature = _payloads.clamp_external_temperature
 
 
 class _FakeSchedule:
@@ -114,3 +117,43 @@ def test_smart_unknown_gates_valve_and_accuracy() -> None:
     )
     assert settings == {}
     assert ignored == ["valve_opening_degree"]
+
+
+def test_temporary_timer_payload() -> None:
+    assert build_temporary_mode_payload("timer", 10, 4) == {
+        "temporary_mode_select": "timer",
+        "temporary_mode_duration": 10,
+        "timer_mode_target_temp": 4.0,
+    }
+
+
+def test_device_settings_map_precedence() -> None:
+    config = {
+        "device_settings": {"open_window": True, "child_lock": False},
+        "areas": [
+            {
+                "id": "kitchen",
+                "device_settings": {"child_lock": True},
+                "thermostats": [
+                    {
+                        "mqtt_name": "kitchen thermostat",
+                        "device_settings": {"frost_protection_temperature": 7},
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert build_device_settings_map(config) == {
+        "kitchen thermostat": {
+            "open_window": True,
+            "child_lock": True,
+            "frost_protection_temperature": 7,
+        }
+    }
+
+
+def test_clamp_external_temperature() -> None:
+    assert clamp_external_temperature(-5) == 0.0
+    assert clamp_external_temperature(21.44) == 21.4
+    assert clamp_external_temperature(100) == 99.9

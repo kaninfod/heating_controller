@@ -9,7 +9,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from .models import WeeklySchedule
-from .payloads import build_mqtt_payload
+from .payloads import build_mqtt_payload, build_temporary_mode_payload
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,6 +83,40 @@ class ThermostatController:
             results.append(await self._publish(topic, payload, mqtt_device_name))
 
         return all(results)
+
+    async def set_temporary_mode(
+        self,
+        thermostat_mqtt_names: list[str],
+        mode: str,
+        duration: int,
+        target_temperature: float | None = None,
+    ) -> bool:
+        """Start a device-side temporary mode (timer or boost)."""
+        if not thermostat_mqtt_names:
+            return True
+
+        payload = build_temporary_mode_payload(
+            mode, duration, target_temperature
+        )
+        payload_json = json.dumps(payload)
+        results: list[bool] = []
+
+        for mqtt_device_name in thermostat_mqtt_names:
+            topic = f"{self.mqtt_topic_base}/{mqtt_device_name}/set"
+            _LOGGER.info(
+                "Starting %s on %s: %s", mode, mqtt_device_name, payload_json
+            )
+            results.append(await self._publish(topic, payload, mqtt_device_name))
+
+        return all(results)
+
+    async def set_external_temperature(
+        self, mqtt_device_name: str, temperature: float
+    ) -> bool:
+        """Publish an external room temperature to one thermostat."""
+        topic = f"{self.mqtt_topic_base}/{mqtt_device_name}/set"
+        payload = {"external_temperature_input": temperature}
+        return await self._publish(topic, payload, mqtt_device_name)
 
     async def _publish(
         self, topic: str, payload: dict[str, Any], device_name: str = ""

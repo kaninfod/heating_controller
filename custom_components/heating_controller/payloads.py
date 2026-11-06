@@ -57,3 +57,53 @@ def build_device_settings(
 
     ignored = [key for key, value in configured.items() if value is not None]
     return settings, ignored
+
+
+def build_temporary_mode_payload(
+    mode: str, duration: int, target_temperature: float | None = None
+) -> dict[str, Any]:
+    """Build a TRV temporary-mode payload (boost or timer)."""
+    payload: dict[str, Any] = {
+        "temporary_mode_select": mode,
+        "temporary_mode_duration": int(duration),
+    }
+
+    if target_temperature is not None:
+        payload["timer_mode_target_temp"] = float(target_temperature)
+
+    return payload
+
+
+def build_device_settings_map(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Merge global, area, and thermostat device settings.
+
+    Only independent settings belong here (open window, frost protection,
+    child lock). Smart-gated valve/accuracy settings are handled separately.
+    """
+    global_settings = dict(config.get("device_settings") or {})
+    settings_by_mqtt: dict[str, dict[str, Any]] = {}
+    allowed = {"open_window", "frost_protection_temperature", "child_lock"}
+
+    for area in config.get("areas", []):
+        area_settings = {
+            **global_settings,
+            **(area.get("device_settings") or {}),
+        }
+
+        for thermostat in area.get("thermostats", []):
+            merged = {
+                **area_settings,
+                **(thermostat.get("device_settings") or {}),
+            }
+            settings_by_mqtt[thermostat["mqtt_name"]] = {
+                key: value
+                for key, value in merged.items()
+                if key in allowed and value is not None
+            }
+
+    return settings_by_mqtt
+
+
+def clamp_external_temperature(value: float) -> float:
+    """Clamp an external temperature to the TRV-supported range."""
+    return round(max(0.0, min(99.9, float(value))), 1)

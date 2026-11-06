@@ -1,0 +1,21 @@
+ventilate:
+  name: Ventilate
+  description: Temporarily close the heating valves for a duration using the TRV's timer mode. The TRV restores its previous mode and temperature when the timer expires.
+  fields:
+    duration:
+      name: Duration
+      description: Minutes to keep the valves closed.
+      required: false
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 240
+          unit_of_measurement: minutes
+    area_ids:
+      name: Areas
+      description: Area IDs to ventilate. Leave empty for all enabled areas.
+      required: false
+      example: "[kitchen]"
+      selector:
+        object:
