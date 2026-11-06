@@ -15,6 +15,7 @@ heating_controller:
   areas:
     - name: Bedroom
       id: bedroom
+      # enabled: false   # use while the TRV is out of service
       thermostats:
         - climate_entity: climate.bedroom_thermostat
           mqtt_name: "bedroom thermostat"

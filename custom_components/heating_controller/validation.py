@@ -104,6 +104,21 @@ def validate_day_type_schedule(schedule: str) -> str:
     return " ".join(normalised)
 
 
+def disabled_mqtt_names(areas: Iterable[dict[str, Any]]) -> set[str]:
+    """Return MQTT names that are disabled at area or thermostat level."""
+    disabled: set[str] = set()
+
+    for area in areas:
+        area_enabled = area.get("enabled", True)
+        for thermostat in area.get("thermostats", []):
+            if not area_enabled or not thermostat.get("enabled", True):
+                name = thermostat.get("mqtt_name")
+                if name:
+                    disabled.add(name)
+
+    return disabled
+
+
 def resolve_effective_area_ids(
     configurations: Sequence[Any], all_area_ids: Iterable[str]
 ) -> list[list[str] | None]:

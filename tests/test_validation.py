@@ -25,6 +25,7 @@ _spec.loader.exec_module(_validation)
 
 validate_day_type_schedule = _validation.validate_day_type_schedule
 resolve_effective_area_ids = _validation.resolve_effective_area_ids
+disabled_mqtt_names = _validation.disabled_mqtt_names
 weekday_name = _validation.weekday_name
 
 
@@ -124,3 +125,47 @@ def test_weekday_name_uses_english_names() -> None:
     assert weekday_name(datetime(2026, 11, 6)) == "friday"
     assert weekday_name(datetime(2026, 11, 7)) == "saturday"
     assert weekday_name(datetime(2026, 11, 8)) == "sunday"
+
+
+class TestDisabledMqttNames:
+    """Explicit enabled/disabled handling."""
+
+    def test_enabled_by_default(self) -> None:
+        areas = [
+            {
+                "id": "bedroom",
+                "thermostats": [
+                    {"mqtt_name": "bedroom thermostat", "climate_entity": "climate.bedroom"}
+                ],
+            }
+        ]
+        assert disabled_mqtt_names(areas) == set()
+
+    def test_disabled_area_disables_all_thermostats(self) -> None:
+        areas = [
+            {
+                "id": "bedroom",
+                "enabled": False,
+                "thermostats": [
+                    {"mqtt_name": "bedroom thermostat", "climate_entity": "climate.bedroom"},
+                    {"mqtt_name": "bedroom second", "climate_entity": "climate.bedroom2"},
+                ],
+            }
+        ]
+        assert disabled_mqtt_names(areas) == {"bedroom thermostat", "bedroom second"}
+
+    def test_disabled_thermostat_only(self) -> None:
+        areas = [
+            {
+                "id": "living_room",
+                "thermostats": [
+                    {"mqtt_name": "living left", "climate_entity": "climate.left"},
+                    {
+                        "mqtt_name": "living right",
+                        "climate_entity": "climate.right",
+                        "enabled": False,
+                    },
+                ],
+            }
+        ]
+        assert disabled_mqtt_names(areas) == {"living right"}

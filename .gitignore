@@ -28,3 +28,6 @@ logs/*.log
 # OS
 .DS_Store
 Thumbs.db
+
+# Local HA logs
+HA Log/

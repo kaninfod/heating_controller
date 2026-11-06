@@ -163,10 +163,12 @@ CONFIG_SCHEMA = vol.Schema(
                     {
                         vol.Required("name"): cv.string,
                         vol.Required("id"): cv.string,
+                        vol.Optional("enabled", default=True): cv.boolean,
                         vol.Required("thermostats"): [
                             {
                                 vol.Required("climate_entity"): cv.entity_id,
                                 vol.Required("mqtt_name"): cv.string,
+                                vol.Optional("enabled", default=True): cv.boolean,
                             }
                         ],
                     }

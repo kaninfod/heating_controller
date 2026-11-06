@@ -134,6 +134,7 @@ Each area has a display `name`, a stable `id` (used by `area_ids`), and one or m
 
 - `climate_entity` — the Home Assistant climate entity.
 - `mqtt_name` — the Zigbee2MQTT device name, used in the MQTT topic.
+- `enabled` — optional boolean, default `true`. Set `false` on an area or thermostat to skip it entirely (e.g. a TRV out of service). Disabled devices receive no publishes.
 
 ### Optional device settings
 

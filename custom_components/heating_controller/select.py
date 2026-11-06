@@ -25,7 +25,7 @@ from .models import ModeConfiguration, PseudoMode
 from .mqtt_handler import ThermostatController
 from .payloads import build_device_settings
 from .schedule_manager import ScheduleManager
-from .validation import resolve_effective_area_ids
+from .validation import disabled_mqtt_names, resolve_effective_area_ids
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -128,6 +128,7 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
             for area in self._areas
             for thermostat in area.get("thermostats", [])
         }
+        self._disabled_mqtt = disabled_mqtt_names(self._areas)
 
         self._device_settings = self._build_device_settings()
 
@@ -383,6 +384,10 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
         available: list[str] = []
 
         for mqtt_name in mqtt_names:
+            if mqtt_name in self._disabled_mqtt:
+                _LOGGER.debug("Skipping disabled thermostat '%s'", mqtt_name)
+                continue
+
             entity_id = self._mqtt_to_climate.get(mqtt_name)
 
             if entity_id:
