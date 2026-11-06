@@ -22,11 +22,5 @@ CONF_VALVE_CLOSING_DEGREE = "valve_closing_degree"
 CONF_TEMPERATURE_ACCURACY = "temperature_accuracy"
 CONF_SMART_TEMPERATURE_CONTROL = "smart_temperature_control"
 
-# Area configuration keys
-CONF_AREA_NAME = "name"
-CONF_AREA_ID = "id"
-CONF_AREA_CLIMATE_ENTITY = "climate_entity"
-CONF_AREA_MQTT_NAME = "mqtt_name"
-
 # Default values
 DEFAULT_MQTT_TOPIC_BASE = "zigbee2mqtt"

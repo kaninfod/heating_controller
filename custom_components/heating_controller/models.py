@@ -7,39 +7,6 @@ from typing import Any
 
 
 @dataclass
-class Thermostat:
-    """Represents a single thermostat in an area."""
-
-    climate_entity: str  # e.g., "climate.bedroom_thermostat"
-    mqtt_name: str  # e.g., "bedroom thermostat"
-
-
-@dataclass
-class Area:
-    """Represents a heating area (room/zone) with one or more thermostats."""
-
-    name: str
-    id: str
-    thermostats: list[Thermostat]
-
-
-@dataclass
-class DayType:
-    """Represents a day type with its temperature schedule."""
-
-    name: str
-    schedule: str  # Format: "HH:MM/TEMP HH:MM/TEMP ..."
-
-
-@dataclass
-class Schedule:
-    """Represents a weekly schedule mapping days to day types."""
-
-    name: str
-    days: dict[str, str]  # day_name -> day_type
-
-
-@dataclass
 class ModeConfiguration:
     """Represents a single mode configuration within a pseudo mode."""
 

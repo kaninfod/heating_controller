@@ -214,7 +214,21 @@ After setup you get:
 - `select.heating_mode` — the main mode selector. Its options are the `name` values from `heating_modes`.
 - `select.previous_heating_mode` — tracks the previously selected mode.
 
-The main selector restores its last option after a Home Assistant restart.
+The main selector restores its last option after a Home Assistant restart and republishes it on startup.
+
+## Diagnostics
+
+`select.heating_mode` exposes extra state attributes for troubleshooting:
+
+- `previous_mode`
+- `configured_areas`
+- `disabled_thermostats`
+- `available_thermostats`
+- `offline_thermostats`
+- `last_apply_success`, `last_apply_time`, `last_apply_error`
+- `last_published`, `last_skipped`
+
+These show exactly which TRVs were published to or skipped by the last mode apply.
 
 ## Example: working from home in the bedroom
 
@@ -287,7 +301,7 @@ For `manual` and `heating_off`, no weekly schedule is sent; optional device sett
 
 - **Ventilation is not implemented in the integration.** `parent_mode: ventilation` is not a valid hard mode and no ventilation service is registered. A separate automation owns the timed off/restore behaviour.
 - **Valve and accuracy are gated by smart control.** They are only sent when `smart_temperature_control: false`; with smart control on, the TRV makes them unavailable.
-- **`default_mode` is not read.** It is accepted as extra config but has no effect.
+- **`default_mode` is not part of the schema.** The integration logs an unknown-key warning if it is present; it has no effect.
 - **`stay_home` is a today-only override.** It does not persist across weekdays.
 - **YAML only.** There is no config flow; `config_flow` is `false`.
 - **No per-area permanent schedule.** Areas follow the schedule of the selected mode; there is no per-area schedule assignment.
