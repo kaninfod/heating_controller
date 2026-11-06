@@ -1,0 +1,16 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Heating Controller"
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "heating_controller_mode": {
+        "name": "Heating Mode"
+      }
+    }
+  }
+}

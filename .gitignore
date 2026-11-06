@@ -10,6 +10,10 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
 
 # IDE
 .vscode/

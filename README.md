@@ -1,465 +1,311 @@
-# Heating Controller API
+# Heating Controller
 
-A REST API for managing multi-zone heating systems with Home Assistant integration. Control your Zigbee thermostats, define heating schedules, and manage different heating modes—all through a simple API or Home Assistant automations.
+A Home Assistant custom integration for room-by-room heating control with Zigbee2MQTT radiator thermostats (TRVZB-style devices).
+
+You define **areas**, reusable **day types**, weekly **schedules**, and named **heating modes** in YAML. The integration calculates a weekly schedule and publishes it to each thermostat over MQTT.
 
 ## Features
 
-- 🏠 **Multi-zone control** - Manage heating independently for each room/area
-- 📅 **Smart scheduling** - Define custom schedules with workday/weekend/holiday variations
-- 🎛️ **Mode switching** - Quick preset modes: default, stay_home, eco, timer, manual, off, ventilation
-- 🏡 **Home Assistant integration** - Automatic area discovery, real-time synchronization, MQTT-based control
-- 🌡️ **TRV support** - Direct control of Zigbee2MQTT radiator thermostats
-- 📊 **REST API** - Full OpenAPI documentation at `/docs`
+- Multi-zone heating with one or more thermostats per area.
+- Reusable temperature curves (`day_types`) and weekly compositions (`schedules`).
+- Named heating modes built from one or more `parent_mode` + `area_ids` slices.
+- Area-specific modes, e.g. "bedroom on the weekend curve, everything else on the normal week".
+- MQTT output to `<mqtt_topic_base>/<mqtt_name>/set` using Zigbee2MQTT device names.
+- Restores the selected mode after a Home Assistant restart.
+- `select.previous_heating_mode` helper entity.
+- YAML configuration only (no config flow).
 
-## Quick Start
+## Requirements
 
-### Prerequisites
+- Home Assistant with the **MQTT** integration configured.
+- Zigbee2MQTT managing the thermostats.
+- Thermostat firmware that accepts the flattened `weekly_schedule_<day>` payload keys.
+- The thermostats paired and named in Zigbee2MQTT exactly as their `mqtt_name` in the config.
 
-- Docker and Docker Compose
-- Home Assistant instance with WebSocket access
-- Zigbee2MQTT (to control TRV devices)
-- Climate entities configured in Home Assistant
+## Installation
 
-### 1. Deploy
+### HACS (custom repository)
 
-```bash
-git clone https://github.com/kaninfod/heating_controller.git
-cd heating_controller
+1. Open HACS → Integrations → ⋮ → **Custom repositories**.
+2. Add `https://github.com/kaninfod/heating_controller` as an **Integration**.
+3. Install **Heating Controller**.
+4. Restart Home Assistant.
 
-# Create configuration
-cp .env.example .env
+### Manual
 
-# Edit .env with your values
-nano .env
+Copy the integration folder into your Home Assistant config:
 
-# Start
-docker-compose up -d
+```text
+config/
+└── custom_components/
+    └── heating_controller/
+        ├── __init__.py
+        ├── const.py
+        ├── manifest.json
+        ├── models.py
+        ├── mqtt_handler.py
+        ├── schedule_manager.py
+        ├── select.py
+        ├── strings.json
+        └── validators.py
 ```
 
-The API will be available at `http://localhost:8321`.
-
-### 2. Configure Home Assistant
-
-Add a REST command to call the controller API. In your `configuration.yaml`:
-
-```yaml
-rest_command:
-  heating_set_mode:
-    url: "http://192.168.68.102:8321/api/modes/set"
-    method: post
-    content_type: "application/json"
-    headers: {"accept": "application/json"}
-    payload: '{"mode": "{{ mode }}", "active_areas": ["{{ rooms }}"], "ventilation_time": {{ ventilation_time }}}'
-
-input_select:
-  heating_mode:
-    name: Heating Mode
-    options:
-      - default
-      - stay_home
-      - eco
-      - timer
-      - manual
-      - off
-      - ventilation
-    initial: default
-```
-
-This allows you to call the heating controller with fine-grained parameters like specific areas and ventilation duration.
-
-### 3. Map Your Thermostats
-
-Edit `config/thermostat_mapping.json` to match your setup:
-
-```json
-{
-  "climate.bedroom_thermostat": "bedroom thermostat",
-  "climate.kitchen_thermostat": "kitchen thermostat",
-  "climate.living_room_thermostat": "living room thermostat"
-}
-```
-
-The controller automatically discovers areas from Home Assistant.
-
-## API Overview
-
-### Set Heating Mode with Parameters
-
-This is the primary way to control heating from Home Assistant:
-
-```bash
-curl -X POST http://localhost:8321/api/modes/set \
-  -H "Content-Type: application/json" \
-  -d '{
-    "mode": "stay_home",
-    "active_areas": ["bedroom", "living_room"],
-    "ventilation_time": 10
-  }'
-```
-
-**Parameters:**
-- `mode` (required): One of `default`, `stay_home`, `eco`, `timer`, `manual`, `off`, `ventilation`
-- `active_areas` (optional): List of specific areas to heat (empty list = all areas)
-- `ventilation_time` (optional): Minutes to run ventilation mode (only for `ventilation` mode)
-
-**Examples:**
-
-Normal heating (all areas):
-```bash
-curl -X POST http://localhost:8321/api/modes/set \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "default", "active_areas": [], "ventilation_time": 0}'
-```
-
-Stay home in bedroom only:
-```bash
-curl -X POST http://localhost:8321/api/modes/set \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "stay_home", "active_areas": ["bedroom"], "ventilation_time": 0}'
-```
-
-Ventilate for 15 minutes:
-```bash
-curl -X POST http://localhost:8321/api/modes/set \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "ventilation", "active_areas": [], "ventilation_time": 15}'
-```
-
-Eco mode (away):
-```bash
-curl -X POST http://localhost:8321/api/modes/set \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "eco", "active_areas": [], "ventilation_time": 0}'
-```
-
-### Get System Status
-
-```bash
-curl http://localhost:8321/api/status
-```
-
-### Change Heating Mode (Simple)
-
-For simple mode changes without parameters:
-
-```bash
-curl -X POST http://localhost:8321/api/modes/default
-```
-
-Available modes:
-- `default` - Normal schedule
-- `stay_home` - Generate optimized schedule for staying home
-- `eco` - Energy-saving mode
-- `timer` - Temporary timer mode
-- `manual` - Manual control without schedule
-- `off` - Turn off heating
-- `ventilation` - Ventilation only
-
-### List Areas
-
-```bash
-curl http://localhost:8321/api/areas
-```
-
-### Get Available Schedules
-
-```bash
-curl http://localhost:8321/api/schedules
-```
-
-### View Schedule Details
-
-```bash
-curl http://localhost:8321/api/schedules/default
-```
-
-### Set Temperature Override
-
-```bash
-curl -X POST http://localhost:8321/api/areas/bedroom/temperature \
-  -H "Content-Type: application/json" \
-  -d '{"temperature": 22}'
-```
-
-### Interactive API Documentation
-
-Open [http://localhost:8321/docs](http://localhost:8321/docs) in your browser to explore all endpoints with a UI.
+Restart Home Assistant after copying.
 
 ## Configuration
 
-### Environment Variables (`.env`)
+Add a `heating_controller:` block to `configuration.yaml`, then restart or reload YAML.
 
-```env
-# Home Assistant WebSocket connection
-HA_WEBSOCKET_URL=wss://your-ha-instance/api/websocket
-HA_ACCESS_TOKEN=eyJ0eXA...  # Long-lived access token from HA profile
+A complete example is in [`examples/configuration.yaml`](examples/configuration.yaml).
 
-# Heating mode input_select entity
-MODE_ENTITY=input_select.heating_mode
+```yaml
+heating_controller:
+  mqtt_topic_base: "zigbee2mqtt"
 
-# Areas to exclude from control (comma-separated)
-# Leave empty to control all discovered areas
-BLACKLISTED_AREAS=
+  areas:
+    - name: Bedroom
+      id: bedroom
+      thermostats:
+        - climate_entity: climate.bedroom_thermostat
+          mqtt_name: "bedroom thermostat"
 
-# Logging
-LOG_LEVEL=DEBUG
-SYSLOG_HOST=192.168.1.100
-SYSLOG_PORT=514
+    - name: Kitchen
+      id: kitchen
+      thermostats:
+        - climate_entity: climate.kitchen_thermostat
+          mqtt_name: "kitchen thermostat"
+
+  day_types:
+    workday: "00:00/18.5 06:30/20 09:00/18.5 17:00/20 22:00/20 23:00/18"
+    weekend: "00:00/18.5 06:30/20 09:00/20 17:00/20 22:00/20 23:00/18"
+    eco: "00:00/18.5 07:00/18.5 09:00/18.5 17:00/18.5 22:00/18.5 23:00/18.5"
+
+  schedules:
+    default:
+      monday: workday
+      tuesday: workday
+      wednesday: workday
+      thursday: workday
+      friday: workday
+      saturday: weekend
+      sunday: weekend
+    eco:
+      monday: eco
+      tuesday: eco
+      wednesday: eco
+      thursday: eco
+      friday: eco
+      saturday: eco
+      sunday: eco
+
+  heating_modes:
+    - name: "Normal mode"
+      configurations:
+        - parent_mode: "default"
+          area_ids: []
+
+    - name: "Stay home"
+      configurations:
+        - parent_mode: "stay_home"
+          area_ids: []
+
+    - name: "Stay home (bedroom only)"
+      configurations:
+        - parent_mode: "stay_home"
+          area_ids: [bedroom]
+        - parent_mode: "default"
+          area_ids: []
+
+    - name: "Eco mode"
+      configurations:
+        - parent_mode: "eco"
+          area_ids: []
+
+    - name: "Heating Off"
+      configurations:
+        - parent_mode: "heating_off"
+          area_ids: []
 ```
 
-### Thermostat Mapping
+### `areas`
 
-**File:** `config/thermostat_mapping.json`
+Each area has a display `name`, a stable `id` (used by `area_ids`), and one or more thermostats:
 
-Maps Home Assistant climate entities to Zigbee2MQTT device names:
+- `climate_entity` — the Home Assistant climate entity.
+- `mqtt_name` — the Zigbee2MQTT device name, used in the MQTT topic.
+
+### `day_types`
+
+A named temperature curve. The format is:
+
+```text
+HH:MM/TEMP HH:MM/TEMP HH:MM/TEMP HH:MM/TEMP HH:MM/TEMP HH:MM/TEMP
+```
+
+Exactly **6** components are required, and the first must be `00:00/...`.
+
+### `schedules`
+
+Maps a schedule name to the day type for each weekday:
+
+```yaml
+default:
+  monday: workday
+  ...
+  saturday: weekend
+  sunday: weekend
+```
+
+`default` and `eco` are the schedule names used by the corresponding hard modes.
+
+### `heating_modes` and `parent_mode`
+
+A heating mode is a user-facing name for one or more **configurations**. Each configuration applies a `parent_mode` to a set of areas:
+
+```yaml
+heating_modes:
+  - name: "Custom mode"
+    configurations:
+      - parent_mode: stay_home
+        area_ids: [bedroom]
+      - parent_mode: default
+        area_ids: []
+```
+
+`parent_mode` is the underlying hard mode. It is **not** inheritance and it is **not** a schedule name.
+
+| `parent_mode` | HVAC sent | Schedule | Meaning |
+|---|---|---|---|
+| `default` | `auto` | `schedules.default` | Normal week. |
+| `stay_home` | `auto` | `schedules.default`, with **today** replaced by the `weekend` day type | Home today, without changing the rest of the week. |
+| `eco` | `auto` | `schedules.eco` | Energy-saving week. |
+| `manual` | `heat` | none | Thermostat runs in local/manual mode. |
+| `heating_off` | `off` | none | Heating off. |
+
+`stay_home` requires a day type literally named `weekend` in `day_types`.
+
+#### How `area_ids` resolves
+
+- A non-empty list applies that `parent_mode` to exactly those areas.
+- An empty list `[]` is a **catch-all for unmentioned areas** when at least one other configuration in the same mode mentions areas.
+- An empty list with no mentioned areas applies to **all areas**.
+- Only one catch-all configuration is allowed per mode.
+- An area ID may not appear in more than one explicit configuration.
+
+## Entities
+
+After setup you get:
+
+- `select.heating_mode` — the main mode selector. Its options are the `name` values from `heating_modes`.
+- `select.previous_heating_mode` — tracks the previously selected mode.
+
+The main selector restores its last option after a Home Assistant restart.
+
+## Example: working from home in the bedroom
+
+```yaml
+- name: "Stay home (bedroom only)"
+  configurations:
+    - parent_mode: "stay_home"
+      area_ids: [bedroom]
+    - parent_mode: "default"
+      area_ids: []
+```
+
+On a weekday this produces:
+
+| Area | Today's curve | 09:00–17:00 |
+|---|---|---|
+| Bedroom | `weekend` | 20 °C |
+| All other areas | `workday` | 18.5 °C |
+
+The bedroom stays warm through the working day; the rest of the apartment follows the normal weekday setback. The second configuration is important: it forces the other areas back to `default`. Without it, unmentioned areas keep whatever mode they were previously in.
+
+`stay_home` only overrides **today**. If you work from home on several days, select the mode again each morning or trigger it from an automation:
+
+```yaml
+service: select.select_option
+target:
+  entity_id: select.heating_mode
+data:
+  option: "Stay home (bedroom only)"
+```
+
+## MQTT payload
+
+Topic:
+
+```text
+<mqtt_topic_base>/<mqtt_name>/set
+```
+
+Example:
+
+```text
+zigbee2mqtt/bedroom thermostat/set
+```
+
+Payload for a scheduled mode:
 
 ```json
 {
-  "climate.bedroom_thermostat": "bedroom thermostat",
-  "climate.kitchen_thermostat": "kitchen thermostat"
+  "system_mode": "auto",
+  "weekly_schedule_monday": "00:00/18.5 06:30/20 09:00/18.5 17:00/20 22:00/20 23:00/18",
+  "weekly_schedule_tuesday": "...",
+  "weekly_schedule_wednesday": "...",
+  "weekly_schedule_thursday": "...",
+  "weekly_schedule_friday": "...",
+  "weekly_schedule_saturday": "...",
+  "weekly_schedule_sunday": "..."
 }
 ```
 
-### Schedule Templates
+For `manual` and `heating_off`, only `system_mode` is sent.
 
-**File:** `config/day_types.json`
+## Known limitations
 
-Defines temperature curves for different day types:
-
-```json
-{
-  "workday": "09:00/21 12:00/18 17:00/21 22:00/17 23:00/16",
-  "weekend": "09:00/20 12:00/18 17:00/20 22:00/17 23:00/16"
-}
-```
-
-Format: `HH:MM/TEMPERATURE` separated by spaces
-
-### Predefined Schedules
-
-**Directory:** `config/schedules/`
-
-Contains JSON files defining weekly schedules:
-
-```json
-{
-  "monday": "workday",
-  "tuesday": "workday",
-  "wednesday": "workday",
-  "thursday": "workday",
-  "friday": "workday",
-  "saturday": "weekend",
-  "sunday": "weekend"
-}
-```
-
-## Home Assistant Integration
-
-### REST Command Control
-
-The recommended way to control the heating from Home Assistant is via the REST command defined in `configuration.yaml`:
-
-```yaml
-rest_command:
-  heating_set_mode:
-    url: "http://192.168.68.102:8321/api/modes/set"
-    method: post
-    content_type: "application/json"
-    headers: {"accept": "application/json"}
-    payload: '{"mode": "{{ mode }}", "active_areas": ["{{ rooms }}"], "ventilation_time": {{ ventilation_time }}}'
-```
-
-This allows automations to call the heating controller with specific parameters.
-
-### Automatic Area Discovery
-
-The controller automatically discovers areas from Home Assistant. Each area with climate entities is available for control via the `active_areas` parameter.
-
-### Example Automations
-
-**Switch to eco mode when everyone leaves:**
-
-```yaml
-automation:
-  - alias: "Heating: Away Mode"
-    trigger:
-      platform: state
-      entity_id: group.all_people
-      to: "not_home"
-    action:
-      - service: rest_command.heating_set_mode
-        data:
-          mode: eco
-          rooms: ""
-          ventilation_time: 0
-```
-
-**Stay home mode with specific bedroom:**
-
-```yaml
-automation:
-  - alias: "Heating: Stay Home - Bedroom"
-    trigger:
-      platform: state
-      entity_id: input_select.heating_mode_detail
-      to: "Stay home (Bedroom)"
-    action:
-      - service: rest_command.heating_set_mode
-        data:
-          mode: stay_home
-          rooms: "bedroom"
-          ventilation_time: 0
-```
-
-**Ventilate for 10 minutes:**
-
-```yaml
-automation:
-  - alias: "Heating: Ventilate"
-    trigger:
-      platform: state
-      entity_id: input_select.heating_mode_detail
-      to: "Ventilate"
-    action:
-      - variables:
-          vent_time: 10
-      - service: rest_command.heating_set_mode
-        data:
-          mode: ventilation
-          rooms: ""
-          ventilation_time: "{{ vent_time }}"
-      - if:
-          - condition: template
-            value_template: "{{ response['status'] == 200 }}"
-        then:
-          - service: timer.start
-            target:
-              entity_id: timer.ventilation_timer
-            data:
-              duration: "00:{{ '{:02d}'.format(vent_time | int) }}:00"
-```
-
-### Mode Synchronization
-
-When you change the heating mode via the API, it updates the `input_select.heating_mode` entity in Home Assistant for synchronization with other automations or dashboards.
-
-### MQTT Integration
-
-Schedules are published to Zigbee2MQTT via MQTT topics:
-
-```
-zigbee2mqtt/{device_name}/set
-```
-
-The controller handles publishing schedule updates automatically when switching modes.
+- **Ventilation is not implemented.** `ventilation_time_minutes` is parsed but unused, `parent_mode: ventilation` is not a valid hard mode, and no `ventilate_for_duration` service is registered.
+- **`valve_opening_degree` is parsed but not published.** The payload line in `mqtt_handler.py` is currently commented out.
+- **`default_mode` is not read.** It is accepted as extra config but has no effect.
+- **`stay_home` is a today-only override.** It does not persist across weekdays.
+- **YAML only.** There is no config flow; `config_flow` is `false`.
+- **No per-area permanent schedule.** Areas follow the schedule of the selected mode; there is no per-area schedule assignment.
 
 ## Troubleshooting
 
-### "No areas discovered"
+### The select has no options
 
-1. Verify Home Assistant connection:
-   - Check `.env` has correct `HA_WEBSOCKET_URL` and `HA_ACCESS_TOKEN`
-   - Ensure access token is a long-lived token from HA profile
-   - Verify network connectivity to Home Assistant
+- Check that the block is under `heating_controller:` in `configuration.yaml`.
+- Check the Home Assistant log for `Configuration validation error`.
+- Ensure `heating_modes` is used, not the old `pseudo_modes` key.
+- Ensure every `parent_mode` is one of `default`, `stay_home`, `eco`, `manual`, `heating_off`.
 
-2. Check area configuration:
-   - Navigate to Settings → Areas in Home Assistant
-   - Create areas and assign devices to them
-   - At least one area must have a climate entity
+### `stay_home` does not change anything
 
-3. View logs:
-   ```bash
-   docker-compose logs app | grep -i area
-   ```
+- Ensure `day_types` contains an entry named exactly `weekend`.
+- Ensure `schedules.default` exists.
+- Check the log for `Day type 'weekend' not found` or `Mode 'default' not found`.
 
-### "Thermostats not updating"
+### Thermostats do not update
 
-1. Verify thermostat mapping:
-   ```bash
-   cat config/thermostat_mapping.json
-   ```
-   - Climate entity IDs must match Home Assistant exactly
-   - Z2M device names must match Zigbee2MQTT device names
+- Confirm the MQTT integration is loaded.
+- Confirm each `mqtt_name` matches the Zigbee2MQTT device name exactly.
+- Watch the log for `Publishing to ...` and `Failed to publish ...`.
 
-2. Check MQTT connectivity:
-   ```bash
-   docker-compose logs app | grep -i mqtt
-   ```
-   - Zigbee2MQTT must be running and accessible
+### Wrong daytime temperature
 
-3. Verify Zigbee pairing:
-   - Device must be paired in Zigbee2MQTT
-   - Device name must be exactly as specified in mapping
+- Check the `workday` / `weekend` `day_types` values.
+- Remember that `stay_home` replaces only **today** with the `weekend` curve.
 
-### "Wrong schedule after restart"
-
-The controller caches schedules in memory. This is normal. To reset:
+## Development
 
 ```bash
-docker-compose restart app
+python -m pip install -r requirements_test.txt
+python -m pytest -q
 ```
 
-### "API endpoint returns 503"
-
-1. Check logs:
-   ```bash
-   docker-compose logs app
-   ```
-
-2. Verify Home Assistant is reachable:
-   ```bash
-   curl $HA_WEBSOCKET_URL
-   ```
-
-3. Restart the service:
-   ```bash
-   docker-compose restart app
-   ```
-
-## Advanced Configuration
-
-### Blacklisting Areas
-
-To prevent specific areas from being controlled:
-
-```env
-BLACKLISTED_AREAS=garage,storage,office
-```
-
-The controller will skip these areas during discovery.
-
-### Logging Configuration
-
-Set log level in `.env`:
-
-```env
-LOG_LEVEL=DEBUG   # Verbose logging
-LOG_LEVEL=INFO    # Standard logging
-LOG_LEVEL=WARNING # Errors only
-```
-
-Send logs to syslog server:
-
-```env
-SYSLOG_HOST=192.168.1.100
-SYSLOG_PORT=514
-```
-
-View logs locally:
-
-```bash
-docker-compose logs -f app
-```
+The integration lives in `custom_components/heating_controller/`. The tests are in `tests/`.
 
 ## License
 
-[Add license information]
-
-## Contributing
-
-Contributions are welcome. Please open an issue or pull request on GitHub.
-
-## Support
-
-For issues or questions, please open an issue on the GitHub repository.
-
+No license file is currently included.

@@ -1,0 +1,84 @@
+# Example configuration for the Heating Controller integration.
+# Add this block to configuration.yaml and restart Home Assistant.
+
+heating_controller:
+  mqtt_topic_base: "zigbee2mqtt"
+
+  # Parsed by the integration but NOT yet published to the thermostats.
+  # See "Known limitations" in README.md before relying on it.
+  # valve_opening_degree: 15
+
+  areas:
+    - name: Bedroom
+      id: bedroom
+      thermostats:
+        - climate_entity: climate.bedroom_thermostat
+          mqtt_name: "bedroom thermostat"
+
+    - name: Kitchen
+      id: kitchen
+      thermostats:
+        - climate_entity: climate.kitchen_thermostat
+          mqtt_name: "kitchen thermostat"
+
+    - name: Living Room
+      id: living_room
+      thermostats:
+        - climate_entity: climate.dining_room_thermostat_left
+          mqtt_name: "dining room thermostat (left)"
+        - climate_entity: climate.dining_room_thermostat_right
+          mqtt_name: "dining room thermostat (right)"
+
+  day_types:
+    workday: "00:00/18.5 06:30/20 09:00/18.5 17:00/20 22:00/20 23:00/18"
+    weekend: "00:00/18.5 06:30/20 09:00/20 17:00/20 22:00/20 23:00/18"
+    eco: "00:00/18.5 07:00/18.5 09:00/18.5 17:00/18.5 22:00/18.5 23:00/18.5"
+
+  schedules:
+    default:
+      monday: workday
+      tuesday: workday
+      wednesday: workday
+      thursday: workday
+      friday: workday
+      saturday: weekend
+      sunday: weekend
+
+    eco:
+      monday: eco
+      tuesday: eco
+      wednesday: eco
+      thursday: eco
+      friday: eco
+      saturday: eco
+      sunday: eco
+
+  heating_modes:
+    - name: "Normal mode"
+      configurations:
+        - parent_mode: "default"
+          area_ids: []
+
+    - name: "Stay home"
+      configurations:
+        - parent_mode: "stay_home"
+          area_ids: []
+
+    # Working from home in the bedroom:
+    # bedroom follows today's weekend curve; everything else follows the normal week.
+    - name: "Stay home (bedroom only)"
+      configurations:
+        - parent_mode: "stay_home"
+          area_ids: [bedroom]
+        - parent_mode: "default"
+          area_ids: []
+
+    - name: "Eco mode"
+      configurations:
+        - parent_mode: "eco"
+          area_ids: []
+
+    - name: "Heating Off"
+      configurations:
+        - parent_mode: "heating_off"
+          area_ids: []
