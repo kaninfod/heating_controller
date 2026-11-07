@@ -156,6 +156,7 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
             if area.get(CONF_TEMPERATURE_SENSOR)
         }
         self._last_external_temperature: dict[str, float] = {}
+        self._external_source_set: set[str] = set()
         self._warned_sensors: set[str] = set()
 
         default_mode = config.get(CONF_DEFAULT_MODE)
@@ -398,6 +399,16 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
                 if not available:
                     continue
 
+                if mqtt_name not in self._external_source_set:
+                    if not await self._thermostat_controller.set_temperature_source(
+                        mqtt_name, "remote_temperature"
+                    ):
+                        _LOGGER.error(
+                            "Failed to set remote_temperature on '%s'", mqtt_name
+                        )
+                        continue
+                    self._external_source_set.add(mqtt_name)
+
                 if self._last_external_temperature.get(mqtt_name) == value:
                     continue
 
@@ -428,6 +439,7 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
             return
 
         self._last_external_temperature.clear()
+        self._external_source_set.clear()
         self._cancel_availability_reapply()
         self._availability_cancel = async_call_later(
             self.hass, _REAPPLY_DELAY_SECONDS, self._async_reapply
@@ -670,6 +682,7 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
             ),
             "last_ventilate_published": self._last_ventilate_published,
             "last_ventilate_skipped": self._last_ventilate_skipped,
+            "external_source_configured": sorted(self._external_source_set),
         }
 
     def _record_apply(

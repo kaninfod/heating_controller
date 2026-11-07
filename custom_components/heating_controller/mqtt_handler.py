@@ -118,6 +118,14 @@ class ThermostatController:
         payload = {"external_temperature_input": temperature}
         return await self._publish(topic, payload, mqtt_device_name)
 
+    async def set_temperature_source(
+        self, mqtt_device_name: str, source: str
+    ) -> bool:
+        """Select the TRV temperature source (e.g. remote_temperature)."""
+        topic = f"{self.mqtt_topic_base}/{mqtt_device_name}/set"
+        payload = {"temperature_sensor_select": source}
+        return await self._publish(topic, payload, mqtt_device_name)
+
     async def _publish(
         self, topic: str, payload: dict[str, Any], device_name: str = ""
     ) -> bool:

@@ -307,7 +307,7 @@ areas:
         mqtt_name: "kitchen thermostat"
 ```
 
-Every 5 minutes, if the value changed by at least 0.1 °C, the integration publishes `external_temperature_input` to every TRV in that area. Unavailable sensors and disabled/offline TRVs are skipped. The TRV must already be set to `remote_temperature` (Z2M's temperature source selector).
+Every 5 minutes, if the value changed by at least 0.1 °C, the integration publishes `external_temperature_input` to every TRV in that area. It also sets `temperature_sensor_select` to `remote_temperature` once per TRV when an area has a temperature sensor. Unavailable sensors and disabled/offline TRVs are skipped.
 
 Remove any old `external_temperature_input` automations after verifying the integration is publishing the same values, otherwise the values will be written twice.
 
