@@ -168,6 +168,9 @@ DEVICE_SETTINGS_SCHEMA = vol.Schema(
             vol.Coerce(float), vol.Range(min=4.0, max=35.0)
         ),
         vol.Optional("child_lock"): cv.boolean,
+        vol.Optional("temperature_accuracy"): vol.All(
+            vol.Coerce(float), vol.Range(min=-1.0, max=-0.2)
+        ),
     },
     extra=vol.ALLOW_EXTRA,
 )

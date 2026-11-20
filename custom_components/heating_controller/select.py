@@ -148,7 +148,12 @@ class HeatingModeSelect(SelectEntity, RestoreEntity):
             for thermostat in area.get("thermostats", [])
         }
         self._disabled_mqtt = disabled_mqtt_names(self._areas)
-        self._device_settings_by_mqtt = build_device_settings_map(config)
+        self._device_settings_by_mqtt = build_device_settings_map(
+            config,
+            smart_temperature_control=config.get(
+                CONF_SMART_TEMPERATURE_CONTROL
+            ),
+        )
 
         self._area_sensors = {
             area["id"]: area[CONF_TEMPERATURE_SENSOR]

@@ -74,15 +74,20 @@ def build_temporary_mode_payload(
     return payload
 
 
-def build_device_settings_map(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def build_device_settings_map(
+    config: dict[str, Any], smart_temperature_control: bool | None = None
+) -> dict[str, dict[str, Any]]:
     """Merge global, area, and thermostat device settings.
 
-    Only independent settings belong here (open window, frost protection,
-    child lock). Smart-gated valve/accuracy settings are handled separately.
+    Independent settings are always included. ``temperature_accuracy`` is
+    included only when smart temperature control is explicitly disabled.
     """
     global_settings = dict(config.get("device_settings") or {})
     settings_by_mqtt: dict[str, dict[str, Any]] = {}
     allowed = {"open_window", "frost_protection_temperature", "child_lock"}
+
+    if smart_temperature_control is False:
+        allowed.add("temperature_accuracy")
 
     for area in config.get("areas", []):
         area_settings = {

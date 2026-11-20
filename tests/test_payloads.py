@@ -157,3 +157,41 @@ def test_clamp_external_temperature() -> None:
     assert clamp_external_temperature(-5) == 0.0
     assert clamp_external_temperature(21.44) == 21.4
     assert clamp_external_temperature(100) == 99.9
+
+
+def test_per_thermostat_accuracy_when_smart_off() -> None:
+    config = {
+        "areas": [
+            {
+                "id": "kitchen",
+                "thermostats": [
+                    {
+                        "mqtt_name": "kitchen thermostat",
+                        "device_settings": {"temperature_accuracy": -0.4},
+                    }
+                ],
+            }
+        ]
+    }
+    assert build_device_settings_map(
+        config, smart_temperature_control=False
+    ) == {"kitchen thermostat": {"temperature_accuracy": -0.4}}
+
+
+def test_per_thermostat_accuracy_filtered_when_smart_on() -> None:
+    config = {
+        "areas": [
+            {
+                "id": "kitchen",
+                "thermostats": [
+                    {
+                        "mqtt_name": "kitchen thermostat",
+                        "device_settings": {"temperature_accuracy": -0.4},
+                    }
+                ],
+            }
+        ]
+    }
+    assert build_device_settings_map(
+        config, smart_temperature_control=True
+    ) == {"kitchen thermostat": {}}

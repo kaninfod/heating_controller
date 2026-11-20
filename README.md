@@ -154,9 +154,12 @@ These settings are written to the TRV only when `smart_temperature_control` is e
 | `smart_temperature_control` | `true` / `false` | When `true` (or omitted), valve opening/closing and temperature accuracy are not sent. |
 | `valve_opening_degree` | 0–100 | Requires firmware 1.1.4+. |
 | `valve_closing_degree` | 0–100 | Requires firmware 1.1.4+. |
-| `temperature_accuracy` | -1.0 to -0.2 | Requires firmware 1.3.0+. |
+| `temperature_accuracy` | -1.0 to -0.2 | Requires firmware 1.3.0+. Can also be set per area/thermostat in `device_settings`. |
 
 If smart temperature control is ON, Zigbee2MQTT makes valve opening and temperature accuracy unavailable. The integration skips them and logs a warning if they are configured. Set `smart_temperature_control: false` only if you have turned smart control off on the TRVs and want to use valve/accuracy instead.
+
+> [!warning] Disabling smart control activates stored valve values
+> With smart control off, the TRVs use their stored `valve_opening_degree`, `valve_closing_degree`, and `temperature_accuracy` values. If they were left at old test values, set them explicitly — for example `valve_opening_degree: 100` and `temperature_accuracy: -0.6` — otherwise the TRVs may keep a restricted opening or an unexpected hysteresis band.
 
 ### `day_types`
 
@@ -325,9 +328,13 @@ heating_controller:
     - id: kitchen
       device_settings:
         child_lock: true
+      thermostats:
+        - mqtt_name: "kitchen thermostat"
+          device_settings:
+            temperature_accuracy: -0.4
 ```
 
-Supported keys: `open_window`, `frost_protection_temperature`, `child_lock`. They are applied with each mode publish and when a TRV reconnects. Valve and temperature-accuracy settings remain gated by `smart_temperature_control` and are not part of this block.
+Supported keys: `open_window`, `frost_protection_temperature`, `child_lock`, and — only when `smart_temperature_control: false` — `temperature_accuracy`. They are applied with each mode publish and when a TRV reconnects. Valve opening/closing remain top-level settings.
 
 ## Midnight reset
 
